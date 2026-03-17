@@ -1,0 +1,23 @@
+# Ignore Vivado build and project files
+*.xpr
+*.jou
+*.log
+*.str
+*.pb
+*.wdb
+*.dir/
+*.sim/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.xsa
+*.bit
+*.bin
+
+# Keep your specific source folders clean
+vivado_project/*
+!vivado_project/.keep
+
+# Ignore MS Office temporary lock files
+~$*
