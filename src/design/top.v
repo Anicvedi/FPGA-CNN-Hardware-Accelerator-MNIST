@@ -15,3 +15,5 @@ module accelerator_TOP(
 	// LED indicators
 	output wire [3:0] LED
     );
+    
+ endmodule

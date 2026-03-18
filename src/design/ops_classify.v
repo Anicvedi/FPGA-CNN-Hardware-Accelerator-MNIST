@@ -2,6 +2,8 @@
 
 module ops_classify(
 	input 	CLK,
-	input 	RESET,
+	input 	RESET
 	
     );
+    
+endmodule

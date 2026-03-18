@@ -2,6 +2,8 @@
 
 module ops_convrelu__PEArray(
 	input 	CLK,
-	input 	RESET,
+	input 	RESET
 	
     );
+    
+endmodule

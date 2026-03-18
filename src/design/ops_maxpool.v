@@ -2,6 +2,8 @@
 
 module ops_maxpool(
 	input 	CLK,
-	input 	RESET,
+	input 	RESET
 	
     );
+    
+endmodule
