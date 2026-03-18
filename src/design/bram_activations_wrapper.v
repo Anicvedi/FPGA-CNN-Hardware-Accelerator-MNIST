@@ -12,7 +12,7 @@ module bram_activations_wrapper(
     output [15:0] doutb
 );
 
-blk_mem_gen_0 your_instance_name (
+bram_activations bram_activations_0 (
     .clka(CLK),
     .ena(ena),
     .wea(wea),

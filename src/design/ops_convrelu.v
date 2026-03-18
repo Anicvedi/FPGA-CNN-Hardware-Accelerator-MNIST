@@ -2,6 +2,8 @@
 
 module ops_convrelu(
 	input 	CLK,
-	input 	RESET,
+	input 	RESET
 	
     );
+    
+endmodule

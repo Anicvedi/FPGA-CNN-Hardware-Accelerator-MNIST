@@ -2,6 +2,8 @@
 
 module serial_to_bram(
 	input 	CLK,
-	input 	RESET,
+	input 	RESET
 	
     );
+    
+endmodule

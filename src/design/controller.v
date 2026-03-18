@@ -2,6 +2,8 @@
 
 module controller(
 	input 	CLK,
-	input 	RESET,
+	input 	RESET
 	
     );
+    
+endmodule
