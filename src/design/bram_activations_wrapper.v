@@ -4,11 +4,11 @@ module bram_activations_wrapper(
     input CLK,
     input ena,
     input [0:0] wea,
-    input [12:0] addra,
+    input [13:0] addra,
     input [15:0] dina,
 
     input enb,
-    input [12:0] addrb,
+    input [13:0] addrb,
     output [15:0] doutb
 );
 
