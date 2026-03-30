@@ -1,3 +1,76 @@
+Write a testbench which tests the maxpool module with the following parameters:
+
+input fmap:
+[
+[[ 1,  2,  3,  4,  5,  6,  7,  8,  9, 10],
+ [11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+ [21, 22, 23, 24, 25, 26, 27, 28, 29, 30],
+ [31, 32, 33, 34, 35, 36, 37, 38, 39, 40],
+ [41, 42, 43, 44, 45, 46, 47, 48, 49, 50],
+ [51, 52, 53, 54, 55, 56, 57, 58, 59, 60]],
+
+[[101, 102, 103, 104, 105, 106, 107, 108, 109, 110],
+ [111, 112, 113, 114, 115, 116, 117, 118, 119, 120],
+ [121, 122, 123, 124, 125, 126, 127, 128, 129, 130],
+ [131, 132, 133, 134, 135, 136, 137, 138, 139, 140],
+ [141, 142, 143, 144, 145, 146, 147, 148, 149, 150],
+ [151, 152, 153, 154, 155, 156, 157, 158, 159, 160]],
+
+[[201, 202, 203, 204, 205, 206, 207, 208, 209, 210],
+ [211, 212, 213, 214, 215, 216, 217, 218, 219, 220],
+ [221, 222, 223, 224, 225, 226, 227, 228, 229, 230],
+ [231, 232, 233, 234, 235, 236, 237, 238, 239, 240],
+ [241, 242, 243, 244, 245, 246, 247, 248, 249, 250],
+ [251, 252, 253, 254, 255, 256, 257, 258, 259, 260]]
+]
+
+input fmap address: 0x0000
+
+input fmap dims (H,W,C): ( 6, 10 , 3 )
+
+output fmap address: 0x012C
+
+output fmap dims (H,W,C): ( 3, 5, 3)
+
+The testbench should declare both modules (bram wrapper and maxpool). The testbench should issue EXT_START_OF_COMPUTE to maxpool and wait for EXT_END_OF_COMPUTE. Assume that the bram module is functional. First write the testvector into the bram, readback and verify that the testevctor is correctly written to bram. Only then give EXT_START_OF_COMPUTE to maxpool module. Print status and result messages for each step.
+
+
+
+
+
+This is the activations BRAM module:
+
+`timescale 1ns / 1ps
+
+module bram_activations_wrapper(
+    input CLK,
+    input ena,
+    input [0:0] wea,
+    input [13:0] addra,
+    input [15:0] dina,
+
+    input enb,
+    input [13:0] addrb,
+    output [15:0] doutb
+);
+
+bram_activations bram_activations_0 (
+    .clka(CLK),
+    .ena(ena),
+    .wea(wea),
+    .addra(addra),
+    .dina(dina),
+
+    .clkb(CLK),
+    .enb(enb),
+    .addrb(addrb),
+    .doutb(doutb)
+);
+
+endmodule
+
+This is the maxpool module:
+
 `timescale 1ns / 1ps
 
 module ops_maxpool(
@@ -242,7 +315,7 @@ module ops_maxpool(
                         BRAM_addra <= out_write_addr;
                         BRAM_dina  <= (BRAM_doutb > win_max) ? BRAM_doutb : win_max;
                         
-                        out_write_addr <= out_write_addr + 1; // increment by 1
+                        out_write_addr <= out_write_addr + 1; // Auto-increment!
                         win_max <= 0; // Reset for next window
                     end else begin
                         BRAM_ena <= 0;
@@ -284,9 +357,11 @@ module ops_maxpool(
 
     //////////////// FSM CODE END   ////////////////
 
-/*
-    //////////////// DEBUG / PRINT STATE ///////////
 
+    //////////////// DEBUG / PRINT STATE ///////////
+    
+    // This block automatically triggers whenever the state changes
+    // and prints a formatted message to your simulation console.
     always @(state_curr) begin
         $write("[%0t ns] ops_maxpool State Transition: ", $time);
         case(state_curr)
@@ -300,7 +375,7 @@ module ops_maxpool(
     end
     
     ////////////////////////////////////////////////
-*/
+
 
 //////////////// AGU CODE BEGIN ////////////////
 
@@ -322,7 +397,7 @@ module ops_maxpool(
         fmap_row_start_addr_next = fmap_row_start_addr;
         channel_start_addr_next  = channel_start_addr;
 
-        // Only advance pointers if FSM is actively running the pipeline
+        // 2. Only advance pointers if FSM is actively running the pipeline
         if (state_curr == FILL || state_curr == COMPUTE) begin
             
             if (w_in == POOL_KERNEL_SIZE - 1) begin
@@ -332,7 +407,7 @@ module ops_maxpool(
                     h_in_next = 0; 
                     win_complete_flag = 1'b1;
                     
-                    // FMAP SLIDING LOGIC 
+                    // --- FMAP SLIDING LOGIC ---
                     if (w_out == OUT_FMAP_DIM_W - 1) begin
                         w_out_next = 0; 
                         
@@ -342,7 +417,7 @@ module ops_maxpool(
                             if (c_out == OUT_FMAP_DIM_C - 1) begin
                                 fmap_compute_almost_done = 1'b1; 
                             end else begin
-                                // Jump to Next Channel
+                                // TODO 1: Jump to Next Channel
                                 c_out_next = c_out + 1;
                                 c_in_next  = c_in + 1;
                                 
@@ -356,7 +431,7 @@ module ops_maxpool(
                                 win_start_addr_next      = channel_start_addr_next;
                             end
                         end else begin
-                            // Jump to Next Row of Windows
+                            // TODO 2: Jump to Next Row of Windows
                             h_out_next = h_out + 1;
                             
                             // Advance the FMAP row anchor (using the offset calculated in IDLE)
@@ -368,7 +443,7 @@ module ops_maxpool(
                             win_start_addr_next      = fmap_row_start_addr_next;
                         end
                     end else begin
-                        // Slide Window Right
+                        // TODO 3: Slide Window Right
                         w_out_next = w_out + 1;
                         
                         // Advance the window anchor right by the pool size
