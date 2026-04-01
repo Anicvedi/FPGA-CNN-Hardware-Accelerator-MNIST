@@ -2,10 +2,10 @@
 // Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
 // --------------------------------------------------------------------------------
 // Tool Version: Vivado v.2025.2 (win64) Build 6299465 Fri Nov 14 19:35:11 GMT 2025
-// Date        : Wed Mar 18 13:16:00 2026
+// Date        : Wed Mar 18 13:15:58 2026
 // Host        : PSL5 running 64-bit major release  (build 9200)
-// Command     : write_verilog -force -mode synth_stub
-//               d:/00_IISc_Work/Sem2/DSD/CourseProject/working_dir/DSD_MNIST_Systolic/vivado_project_dir/DSD_CNN_MNIST/DSD_CNN_MNIST.gen/sources_1/ip/bram_weights/bram_weights_stub.v
+// Command     : write_verilog -force -mode synth_stub -rename_top bram_weights -prefix
+//               bram_weights_ bram_weights_stub.v
 // Design      : bram_weights
 // Purpose     : Stub declaration of top-level module interface
 // Device      : xc7a200tfbg484-1
