@@ -1,0 +1,181 @@
+The format of my instructions is as follows:
+1. 		Each instruction is 3 words, each word is 64 bits:
+1.1. 	Word 1: Opcode (8 bits), Input address in bram_activations (14 bits), Weights address in bram_weights (14 bits), Output address in bram_activations (14 bits)
+1.2.	Word 2: Input dim1 (10 bits), Input dim2 (10 bits), Input dim3 (10 bits), Weights dim1 (10 bits), Weights dim2 (10 bits), Weights dim3 (10 bits)
+1.3.	Word 3: Output dim1 (10 bits), Output dim2 (10 bits), Output dim3 (10 bits), Pool dim (8 bits), conv stride (8 bits)
+The bit field mapping for each word in same sequence as they are written and pack things inside each word.
+Dimension mapping: (dim1, dim2, dim3) = (H, W, C)
+
+Memory map:
+Looks okay. 
+I want you to instantiate the controller, bram_activations, bram_instructions, maxpool module. 
+The connections should be:
+a. controller <-> bram_instructions: connect these signals:
+	ENA,
+	WEA,      
+    ADDRA,  
+    DINA,	
+    DOUTA 
+
+b. controller <-> maxpool: connect these signals:
+   EN_MAXP,
+   SOP_MAXP,
+   EOP_MAXP,
+   
+c. maxpool <-> bram_activations: connect these signals:
+    BRAM_ena,
+    BRAM_wea,
+    BRAM_addra,
+    BRAM_dina,
+	BRAM_enb,
+    BRAM_addrb,
+    BRAM_doutb
+
+The testbench should do the following:
+1. Write test vector to the bram_activations as follows:
+input fmap: should be of this pattern type, modify as per input fmap dims given below.
+[
+[[ 1,  2,  3,  4,  5,  6,  7,  8,  9, 10],
+ [11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+ [21, 22, 23, 24, 25, 26, 27, 28, 29, 30],
+ [31, 32, 33, 34, 35, 36, 37, 38, 39, 40],
+ [41, 42, 43, 44, 45, 46, 47, 48, 49, 50],
+ [51, 52, 53, 54, 55, 56, 57, 58, 59, 60]],
+
+[[101, 102, 103, 104, 105, 106, 107, 108, 109, 110],
+ [111, 112, 113, 114, 115, 116, 117, 118, 119, 120],
+ [121, 122, 123, 124, 125, 126, 127, 128, 129, 130],
+ [131, 132, 133, 134, 135, 136, 137, 138, 139, 140],
+ [141, 142, 143, 144, 145, 146, 147, 148, 149, 150],
+ [151, 152, 153, 154, 155, 156, 157, 158, 159, 160]],
+
+[[201, 202, 203, 204, 205, 206, 207, 208, 209, 210],
+ [211, 212, 213, 214, 215, 216, 217, 218, 219, 220],
+ [221, 222, 223, 224, 225, 226, 227, 228, 229, 230],
+ [231, 232, 233, 234, 235, 236, 237, 238, 239, 240],
+ [241, 242, 243, 244, 245, 246, 247, 248, 249, 250],
+ [251, 252, 253, 254, 255, 256, 257, 258, 259, 260]]
+]
+
+input fmap address: 0x0000
+
+input fmap dims (H,W,C): ( 12, 20 , 3 )
+
+maxpool1 output fmap address: calculate and put into instruction
+
+maxpool1 output fmap dims: calculate and put into instruction
+
+maxpool2 output fmap address: calculate and put into instruction
+
+maxpool2 output fmap dims: calculate and put into instruction
+
+2. Write necessary instructions to the controller to do (form the instructions as per the format given above):
+a. Maxpool 2x2 on input fmap (opcode for maxpool is 0x01, opcode for conv is 0x02)
+b. Maxpool 2x2 on output of first maxpool
+c. Halt instruction (opcode is 0xFF, all other arguments are 0)
+
+3. Make START_CONTROLLER input of controller HIGH
+
+4. Check final output against expeected (read and compare activations BRAM)
+
+
+
+The portmap for the controller is shown below:
+
+module controller (
+
+	// control signals:
+    input CLK,
+    input RST,
+    input START_CONTROLLER,   // Start signal
+
+    // Instruction BRAM interface:
+	output 			ENA,
+	output 			WEA,      
+    output 	[ 9:0] 	ADDRA,  
+    output 	[63:0] 	DINA,	
+    input 	[63:0] 	DOUTA 
+
+    // Control signals to modules
+	// clock gating en (these are decoded from OPCODE):
+    output reg EN_CONV,
+    output reg EN_MAXP,
+	// SOP to modules (can be a single signal but following convention from you guys and putting multiple signals)
+	output reg SOP_CONV,
+	output reg SOP_MAXP,
+    // EOP from modules
+    input EOP_CONV,
+    input EOP_MAXP,
+
+    // Decoded fields, interface to other modules
+	// decoded from word1 of instruction:
+	output reg [13:0] INP_ACT_ADDR,
+	output reg [13:0] INP_WGT_ADDR,
+	output reg [13:0] OUT_ACT_ADDR,
+	// decoded from word2 of instruction:
+	output [9:0] INP_ACT_DIM1,
+	output [9:0] INP_ACT_DIM2,
+	output [9:0] INP_ACT_DIM3,
+	output [9:0] WGT_DIM1,
+	output [9:0] WGT_DIM2,
+	output [9:0] WGT_DIM3,
+	// decoded from word3 of instruction:
+	output [9:0] OUT_ACT_DIM1,
+	output [9:0] OUT_ACT_DIM2,
+	output [9:0] OUT_ACT_DIM3,
+	output [7:0] POOL_DIM,
+	output [7:0] CONV_STRIDE,
+	
+	output reg halt		// only for debug, goes to testbench
+);
+
+
+
+The portmap for the instructions bram is shown below:
+module bram_instructions_wrapper(
+	input 			CLK,
+	input 			ENA,
+	input 			WEA,      
+    input 	[ 9:0] 	ADDRA,  
+    input 	[63:0] 	DINA,	
+    output 	[63:0] 	DOUTA 
+    );
+	
+The portmap for the maxpool module is shown below:
+module ops_maxpool(
+    // clk, reset, module_en:
+    input   CLK_IN,
+    input   RESET,  // active HIGH reset
+    input MODULE_EN,    // gates clk, active HIGH
+    
+    // control signals:
+
+    input EXT_START_OF_COMPUTE,
+    output reg EXT_END_OF_COMPUTE,
+
+    // input activation:
+    input [13:0] IN_FMAP_BASEADDR,
+    input [9:0] IN_FMAP_DIM_W,
+    input [9:0] IN_FMAP_DIM_H,
+    input [9:0] IN_FMAP_DIM_C,
+
+    // output activation:
+    input [13:0] OUT_FMAP_BASEADDR,
+    input [9:0] OUT_FMAP_DIM_W,
+    input [9:0] OUT_FMAP_DIM_H,
+    input [9:0] OUT_FMAP_DIM_C,
+
+    // pooling parameters:
+    input [7:0] POOL_KERNEL_SIZE,
+
+    // activations BRAM interface:
+    // port a:
+    output reg BRAM_ena,
+    output reg BRAM_wea,
+    output reg [13:0] BRAM_addra,
+    output reg [15:0] BRAM_dina,
+    // port b:
+    output reg BRAM_enb,
+    output reg [13:0] BRAM_addrb,
+    input [15:0] BRAM_doutb
+    );

@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 
-module bram_instruction(
+module controller(
 	input 	CLK,
 	input 	RESET
 	
