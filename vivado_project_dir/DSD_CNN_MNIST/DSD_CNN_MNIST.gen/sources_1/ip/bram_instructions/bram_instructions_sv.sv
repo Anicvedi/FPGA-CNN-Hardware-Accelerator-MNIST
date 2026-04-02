@@ -62,9 +62,9 @@ module bram_instructions_sv (
   (* X_INTERFACE_IGNORE = "true" *)
   input wire [9:0] addra,
   (* X_INTERFACE_IGNORE = "true" *)
-  input wire [15:0] dina,
+  input wire [63:0] dina,
   (* X_INTERFACE_IGNORE = "true" *)
-  output wire [15:0] douta
+  output wire [63:0] douta
 );
 
   bram_instructions inst (

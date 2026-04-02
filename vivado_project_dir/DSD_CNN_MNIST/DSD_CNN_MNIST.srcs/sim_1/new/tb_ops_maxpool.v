@@ -9,6 +9,7 @@ module tb_ops_maxpool();
     // Control Signals
     reg EXT_START_OF_COMPUTE;
     wire EXT_END_OF_COMPUTE;
+    reg EXT_MAXPOOL_CLK_EN;
 
     // Module Parameters (Updated for 3x3 Pooling)
     reg [13:0] IN_FMAP_BASEADDR  = 14'h0000;
@@ -58,7 +59,7 @@ module tb_ops_maxpool();
 
     // Instantiate Maxpool Module
     ops_maxpool uut_maxpool (
-        .CLK(CLK),
+        .CLK_IN(CLK),
         .RESET(RESET),
         .EXT_START_OF_COMPUTE(EXT_START_OF_COMPUTE),
         .EXT_END_OF_COMPUTE(EXT_END_OF_COMPUTE),
@@ -116,6 +117,7 @@ module tb_ops_maxpool();
         $display("==================================================");
 
         // 1. Initialize Signals
+        EXT_MAXPOOL_CLK_EN = 0;
         RESET = 1;
         EXT_START_OF_COMPUTE = 0;
         tb_active = 1; // TB controls BRAM
@@ -202,7 +204,8 @@ module tb_ops_maxpool();
         // ---------------------------------------------------------
         $display("\n[PHASE 3] Handing over BRAM control and Starting Maxpool Compute...");
         tb_active = 0; // Hand over control to Maxpool
-        
+        @(posedge CLK)
+        EXT_MAXPOOL_CLK_EN = 1;
         @(posedge CLK);
         EXT_START_OF_COMPUTE = 1;
         @(posedge CLK);
@@ -253,6 +256,7 @@ module tb_ops_maxpool();
         end
         @(posedge CLK);
         tb_BRAM_enb = 0;
+        EXT_MAXPOOL_CLK_EN = 0;
 
         // ---------------------------------------------------------
         // FINAL RESULTS
