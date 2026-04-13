@@ -1,0 +1,471 @@
+Write a testbench which tests the maxpool module with the following parameters:
+
+input fmap:
+[
+[[ 1,  2,  3,  4,  5,  6,  7,  8,  9, 10],
+ [11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+ [21, 22, 23, 24, 25, 26, 27, 28, 29, 30],
+ [31, 32, 33, 34, 35, 36, 37, 38, 39, 40],
+ [41, 42, 43, 44, 45, 46, 47, 48, 49, 50],
+ [51, 52, 53, 54, 55, 56, 57, 58, 59, 60]],
+
+[[101, 102, 103, 104, 105, 106, 107, 108, 109, 110],
+ [111, 112, 113, 114, 115, 116, 117, 118, 119, 120],
+ [121, 122, 123, 124, 125, 126, 127, 128, 129, 130],
+ [131, 132, 133, 134, 135, 136, 137, 138, 139, 140],
+ [141, 142, 143, 144, 145, 146, 147, 148, 149, 150],
+ [151, 152, 153, 154, 155, 156, 157, 158, 159, 160]],
+
+[[201, 202, 203, 204, 205, 206, 207, 208, 209, 210],
+ [211, 212, 213, 214, 215, 216, 217, 218, 219, 220],
+ [221, 222, 223, 224, 225, 226, 227, 228, 229, 230],
+ [231, 232, 233, 234, 235, 236, 237, 238, 239, 240],
+ [241, 242, 243, 244, 245, 246, 247, 248, 249, 250],
+ [251, 252, 253, 254, 255, 256, 257, 258, 259, 260]]
+]
+
+input fmap address: 0x0000
+
+input fmap dims (H,W,C): ( 6, 10 , 3 )
+
+output fmap address: 0x012C
+
+output fmap dims (H,W,C): ( 3, 5, 3)
+
+The testbench should declare both modules (bram wrapper and maxpool). The testbench should issue EXT_START_OF_COMPUTE to maxpool and wait for EXT_END_OF_COMPUTE. Assume that the bram module is functional. First write the testvector into the bram, readback and verify that the testevctor is correctly written to bram. Only then give EXT_START_OF_COMPUTE to maxpool module. Print status and result messages for each step.
+
+
+
+
+
+This is the activations BRAM module:
+
+`timescale 1ns / 1ps
+
+module bram_activations_wrapper(
+    input CLK,
+    input ena,
+    input [0:0] wea,
+    input [13:0] addra,
+    input [15:0] dina,
+
+    input enb,
+    input [13:0] addrb,
+    output [15:0] doutb
+);
+
+bram_activations bram_activations_0 (
+    .clka(CLK),
+    .ena(ena),
+    .wea(wea),
+    .addra(addra),
+    .dina(dina),
+
+    .clkb(CLK),
+    .enb(enb),
+    .addrb(addrb),
+    .doutb(doutb)
+);
+
+endmodule
+
+This is the maxpool module:
+
+`timescale 1ns / 1ps
+
+module ops_maxpool(
+    // clk, reset:
+    input   CLK,
+    input   RESET,  // active HIGH reset
+    
+    // control signals:
+
+    input EXT_START_OF_COMPUTE,
+    output reg EXT_END_OF_COMPUTE,
+
+    // input activation:
+    input [13:0] IN_FMAP_BASEADDR,
+    input [9:0] IN_FMAP_DIM_W,
+    input [9:0] IN_FMAP_DIM_H,
+    input [9:0] IN_FMAP_DIM_C,
+
+    // output activation:
+    input [13:0] OUT_FMAP_BASEADDR,
+    input [9:0] OUT_FMAP_DIM_W,
+    input [9:0] OUT_FMAP_DIM_H,
+    input [9:0] OUT_FMAP_DIM_C,
+
+    // pooling parameters:
+    input [7:0] POOL_KERNEL_SIZE,
+
+    // activations BRAM interface:
+    // port a:
+    output reg BRAM_ena,
+    output reg BRAM_wea,
+    output reg [13:0] BRAM_addra,
+    output reg [15:0] BRAM_dina,
+    // port b:
+    output reg BRAM_enb,
+    output reg [13:0] BRAM_addrb,
+    input [15:0] BRAM_doutb
+    );
+    
+    /*
+        MODULE DESCRIPTION:
+
+        - Max Pooling operation for 3D feature maps.
+        - Supports variable kernel sizes (e.g., 2x2, 3x3).
+        - Stride is equal to kernel size (non-overlapping pooling).
+        - A window is [POOL_KERNEL_SIZE x POOL_KERNEL_SIZE].
+
+        - The module contains an FSM and an Address Generation Unit (AGU). 
+        -- The states of the FSM are as follows:
+        ---- IDLE:  Initializes variables, including win_max. Stays in this state until EXT_START_OF_COMPUTE is asserted.
+        ---- FILL:  Fills pipeline (BRAM has 2 cycle latency: CLK1: set BRAM_en, BRAM_addrb, CLK2: read BRAM_doutb )
+        ---- COMPUTE:   Reads BRAM data line, updates BRAM's address line (for next clock)
+                        Keeps on comparing currently read pixel with win_max. 
+                        At the end of the window, writes win_max to output activation address.
+                        The address for the current pixel is updated by the combinational AGU.
+                        The FSM stays in this state until the entire fmap is iterated over (IN_FMAP_DIM_W x IN_FMAP_DIM_H x IN_FMAP_DIM_C)
+        ---- FLUSH: Reads the final pixel without setting a new address onto BRAM's address lines. Flushes the pipeline.
+        ---- DONE:  Asserts EXT_END_OF_COMPUTE signal to the controller
+
+    */
+
+    //////////////// FSM CODE BEGIN ////////////////
+
+    // registers:
+    //state:
+    reg [2:0] state_curr;
+    reg [2:0] state_next;
+    // pointers (_next: assigned by AGU using normal ones and used by FSM, normal ones: modified and assigned by FSM):
+    reg [9:0] h_in, h_in_next;
+    reg [9:0] w_in, w_in_next;
+    reg [9:0] c_in, c_in_next;
+    reg [9:0] h_out, h_out_next;
+    reg [9:0] w_out, w_out_next;
+    reg [9:0] c_out, c_out_next;
+    reg [13:0] win_start_addr, win_start_addr_next;
+    reg [13:0] win_row_start_addr, win_row_start_addr_next;
+    // pipeline counters (max 3 wait states):
+    reg [2:0] pipe_fill_ctr, pipe_flush_ctr;
+    parameter NUM_WAIT_STATES_BRAM = 3;     // 3 because sequence is: clk1: BRAM_addrb generated by AGU; clk2: BRAM_addrb latched by BRAM; clk3: BRAM_doutb available
+    // local storage registers:
+    reg [15:0] win_max;
+    // control signals:
+    reg fmap_compute_almost_done;
+    reg win_complete_flag;
+    reg [NUM_WAIT_STATES_BRAM-1:0] win_done_sr; // shift register to delay win_complete_flag by wait states required by BRAM
+    reg [13:0] out_write_addr;
+
+    // offsets:
+    reg [13:0] inside_fmap_channel_offset;
+    reg [13:0] row_jump_offset;
+    reg [13:0] win_base_addr, win_base_addr_next;
+    reg [13:0] fmap_row_start_addr, fmap_row_start_addr_next;
+    reg [13:0] channel_start_addr, channel_start_addr_next;
+
+
+    // define states:
+    localparam IDLE = 0;
+    localparam FILL = 1;
+    localparam COMPUTE = 2;
+    localparam FLUSH = 3;
+    localparam DONE = 4;
+
+    // state transition logic:
+    always @(*) begin
+        
+        // Default
+        state_next = state_curr;
+
+        case(state_curr)
+            IDLE: begin
+
+                if (EXT_START_OF_COMPUTE)
+                    state_next = FILL;
+                else
+                    state_next = IDLE;
+            end
+
+            FILL: begin
+                
+                if (pipe_fill_ctr == 0)
+                    state_next = COMPUTE;
+                else begin
+                    state_next = FILL;
+                end
+            end
+
+            COMPUTE: begin
+                
+                if (fmap_compute_almost_done)
+                    state_next = FLUSH;
+                else
+                    state_next = COMPUTE;
+            end
+
+            FLUSH: begin
+                
+                if (pipe_flush_ctr == 0)
+                    state_next = DONE;
+                else
+                    state_next = FLUSH;
+            end
+
+            DONE: begin
+                state_next = IDLE;
+            end
+
+            default: state_next = IDLE;
+        endcase
+    end 
+
+    // state transition and clocked output assignment:
+    always @(posedge CLK) begin
+        if (RESET) begin
+            state_curr <= IDLE;
+            EXT_END_OF_COMPUTE <= 0;
+            BRAM_enb <= 0;
+            BRAM_ena <= 0;
+            BRAM_wea <= 0;
+            win_max <= 0;
+            BRAM_addrb         <= 0;
+            BRAM_addra         <= 0;   
+            BRAM_dina          <= 0;   
+        end else begin
+            state_curr <= state_next;
+            case(state_curr)
+                IDLE: begin
+                    // initialize pointers:
+                    h_in <= 0; w_in <= 0; c_in <= 0; h_out <= 0; w_out <= 0; c_out <= 0;
+                    win_start_addr <= IN_FMAP_BASEADDR; 
+                    win_row_start_addr <= IN_FMAP_BASEADDR;
+                    win_base_addr <= IN_FMAP_BASEADDR;
+                    fmap_row_start_addr <= IN_FMAP_BASEADDR;
+                    channel_start_addr <= IN_FMAP_BASEADDR;
+
+                    // initialize offsets:
+                    inside_fmap_channel_offset <= IN_FMAP_DIM_W * IN_FMAP_DIM_H;
+                    row_jump_offset <= POOL_KERNEL_SIZE * IN_FMAP_DIM_W;
+
+                    // initialize pipeline ctrs:
+                    pipe_fill_ctr <= NUM_WAIT_STATES_BRAM - 1; 
+                    pipe_flush_ctr <= NUM_WAIT_STATES_BRAM - 1;
+
+                    // Reset control signals
+                    EXT_END_OF_COMPUTE <= 0;
+                    BRAM_enb <= 0;
+                    BRAM_wea <= 0;
+                    
+                    win_done_sr <= 0;
+                    out_write_addr <= OUT_FMAP_BASEADDR;    
+                    
+                    win_max <= 0;
+                end
+
+                FILL: begin
+                    h_in               <= h_in_next;
+                    w_in               <= w_in_next;
+                    h_out              <= h_out_next; 
+                    w_out              <= w_out_next; 
+                    c_in               <= c_in_next;  
+                    c_out              <= c_out_next; 
+                    
+                    win_start_addr     <= win_start_addr_next;
+                    win_row_start_addr <= win_row_start_addr_next;
+                    pipe_fill_ctr      <= pipe_fill_ctr - 1;
+
+                    BRAM_enb   <= 1;
+                    BRAM_addrb <= win_start_addr;
+
+                    win_base_addr        <= win_base_addr_next;
+                    fmap_row_start_addr  <= fmap_row_start_addr_next;
+                    channel_start_addr   <= channel_start_addr_next;
+
+                    win_done_sr <= {win_done_sr[NUM_WAIT_STATES_BRAM-2:0], win_complete_flag};
+                end
+
+                COMPUTE: begin
+                    h_in               <= h_in_next;
+                    w_in               <= w_in_next;
+                    h_out              <= h_out_next;
+                    w_out              <= w_out_next;
+                    c_in               <= c_in_next;
+                    c_out              <= c_out_next; 
+                    
+                    win_start_addr     <= win_start_addr_next;
+                    win_row_start_addr <= win_row_start_addr_next;
+
+                    BRAM_enb   <= 1;
+                    BRAM_addrb <= win_start_addr;
+                    
+                    win_base_addr      <= win_base_addr_next;
+                    fmap_row_start_addr<= fmap_row_start_addr_next;
+                    channel_start_addr <= channel_start_addr_next;
+
+                    // output write, based on read latency:
+                    // 1. Shift the flag
+                    win_done_sr <= {win_done_sr[NUM_WAIT_STATES_BRAM-2:0], win_complete_flag};
+
+                    // 2. Write-back triggered by the MSB of the shift register
+                    if (win_done_sr[NUM_WAIT_STATES_BRAM-1]) begin
+                        BRAM_ena   <= 1;
+                        BRAM_wea   <= 1;
+                        BRAM_addra <= out_write_addr;
+                        BRAM_dina  <= (BRAM_doutb > win_max) ? BRAM_doutb : win_max;
+                        
+                        out_write_addr <= out_write_addr + 1; // Auto-increment!
+                        win_max <= 0; // Reset for next window
+                    end else begin
+                        BRAM_ena <= 0;
+                        BRAM_wea <= 0;
+                        win_max <= (BRAM_doutb > win_max) ? BRAM_doutb : win_max;
+                    end
+                end
+
+                FLUSH: begin
+                    BRAM_enb <= 1;
+                    pipe_flush_ctr <= pipe_flush_ctr - 1;
+
+                    // Feed zeros into the pipeline to drain it
+                    win_done_sr <= {win_done_sr[NUM_WAIT_STATES_BRAM-2:0], 1'b0};
+
+                    // Same write logic as COMPUTE to catch the final window
+                    if (win_done_sr[NUM_WAIT_STATES_BRAM-1]) begin
+                        BRAM_ena   <= 1;
+                        BRAM_wea   <= 1;
+                        BRAM_addra <= out_write_addr;
+                        BRAM_dina  <= (BRAM_doutb > win_max) ? BRAM_doutb : win_max;
+                        
+                        out_write_addr <= out_write_addr + 1;
+                        win_max <= 0;
+                    end else begin
+                        BRAM_ena <= 0;
+                        BRAM_wea <= 0;
+                        win_max <= (BRAM_doutb > win_max) ? BRAM_doutb : win_max;
+                    end
+                end
+
+                DONE: begin
+                    EXT_END_OF_COMPUTE <= 1;
+                end
+
+            endcase
+        end
+    end
+
+    //////////////// FSM CODE END   ////////////////
+
+
+    //////////////// DEBUG / PRINT STATE ///////////
+    
+    // This block automatically triggers whenever the state changes
+    // and prints a formatted message to your simulation console.
+    always @(state_curr) begin
+        $write("[%0t ns] ops_maxpool State Transition: ", $time);
+        case(state_curr)
+            IDLE:    $display("IDLE");
+            FILL:    $display("FILL");
+            COMPUTE: $display("COMPUTE");
+            FLUSH:   $display("FLUSH");
+            DONE:    $display("DONE");
+            default: $display("UNKNOWN STATE");
+        endcase
+    end
+    
+    ////////////////////////////////////////////////
+
+
+//////////////// AGU CODE BEGIN ////////////////
+
+    always @(*) begin
+        
+        
+        // Defaults to prevent latches:
+        h_in_next                = h_in;
+        w_in_next                = w_in;
+        h_out_next               = h_out;
+        w_out_next               = w_out;
+        c_in_next                = c_in;
+        c_out_next               = c_out;
+        win_start_addr_next      = win_start_addr;
+        win_row_start_addr_next  = win_row_start_addr;
+        win_complete_flag        = 1'b0;
+        fmap_compute_almost_done = 1'b0;
+        win_base_addr_next       = win_base_addr;
+        fmap_row_start_addr_next = fmap_row_start_addr;
+        channel_start_addr_next  = channel_start_addr;
+
+        // 2. Only advance pointers if FSM is actively running the pipeline
+        if (state_curr == FILL || state_curr == COMPUTE) begin
+            
+            if (w_in == POOL_KERNEL_SIZE - 1) begin
+                w_in_next = 0; 
+                
+                if (h_in == POOL_KERNEL_SIZE - 1) begin
+                    h_in_next = 0; 
+                    win_complete_flag = 1'b1;
+                    
+                    // --- FMAP SLIDING LOGIC ---
+                    if (w_out == OUT_FMAP_DIM_W - 1) begin
+                        w_out_next = 0; 
+                        
+                        if (h_out == OUT_FMAP_DIM_H - 1) begin
+                            h_out_next = 0; 
+                            
+                            if (c_out == OUT_FMAP_DIM_C - 1) begin
+                                fmap_compute_almost_done = 1'b1; 
+                            end else begin
+                                // TODO 1: Jump to Next Channel
+                                c_out_next = c_out + 1;
+                                c_in_next  = c_in + 1;
+                                
+                                // Advance the channel anchor
+                                channel_start_addr_next  = channel_start_addr + inside_fmap_channel_offset;
+                                
+                                // Reset all other anchors to the new channel start
+                                fmap_row_start_addr_next = channel_start_addr_next;
+                                win_base_addr_next       = channel_start_addr_next;
+                                win_row_start_addr_next  = channel_start_addr_next;
+                                win_start_addr_next      = channel_start_addr_next;
+                            end
+                        end else begin
+                            // TODO 2: Jump to Next Row of Windows
+                            h_out_next = h_out + 1;
+                            
+                            // Advance the FMAP row anchor (using the offset calculated in IDLE)
+                            fmap_row_start_addr_next = fmap_row_start_addr + row_jump_offset;
+                            
+                            // Reset window anchors to the start of this new row
+                            win_base_addr_next       = fmap_row_start_addr_next;
+                            win_row_start_addr_next  = fmap_row_start_addr_next;
+                            win_start_addr_next      = fmap_row_start_addr_next;
+                        end
+                    end else begin
+                        // TODO 3: Slide Window Right
+                        w_out_next = w_out + 1;
+                        
+                        // Advance the window anchor right by the pool size
+                        win_base_addr_next       = win_base_addr + POOL_KERNEL_SIZE;
+                        
+                        // Reset the reading pointers to this new window anchor
+                        win_row_start_addr_next  = win_base_addr_next;
+                        win_start_addr_next      = win_base_addr_next;
+                    end
+                end else begin
+                    // Move down 1 row INSIDE the current window
+                    h_in_next = h_in + 1;
+                    win_row_start_addr_next = win_row_start_addr + IN_FMAP_DIM_W;
+                    win_start_addr_next     = win_row_start_addr + IN_FMAP_DIM_W;
+                end
+            end else begin
+                // Move right 1 pixel INSIDE the current window
+                w_in_next = w_in + 1;
+                win_start_addr_next = win_start_addr + 1;
+            end
+        end
+    end
+    //////////////// AGU CODE END   ////////////////
+
+endmodule
