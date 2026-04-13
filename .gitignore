@@ -16,8 +16,32 @@
 *.bin
 
 # Keep your specific source folders clean
-vivado_project/*
-!vivado_project/.keep
+vivado_project_dir/*
+!vivado_project_dir/.keep
 
 # Ignore MS Office temporary lock files
 ~$*
+
+# Vivado generated directories
+*.sim/
+*.runs/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.gen/
+*.jou
+*.log
+*.str
+
+# Datasets
+data/MNIST/
+*.idx3-ubyte
+*.idx1-ubyte
+
+# Large ML/Hardware files
+*.wdb
+*.vcd
+*.dcp
+*.bit
+
+vivado_project_dir/
