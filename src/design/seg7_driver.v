@@ -22,7 +22,7 @@ module seg7_driver(
 );
     
     // Target address where ops_classifier writes the final prediction
-    localparam BRAM_ACT_CNN_RESULT_ADDR = 14'd16380;  
+    localparam BRAM_ACT_CNN_RESULT_ADDR = 14'd8190;  
 
     // ==================================================
     // 1. FSM: Fetch Result from BRAM

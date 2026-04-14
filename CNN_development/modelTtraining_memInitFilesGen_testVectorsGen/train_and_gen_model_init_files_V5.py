@@ -231,7 +231,7 @@ def build_uart_stream(img_q_2d, H, W, C):
 # ==========================================================================
 #  HARDWARE COMPILER
 # ==========================================================================
-HW_SEG7_RESULT_ADDR = 16380  # shifted to end of activation BRAM. Must match seg7_driver.v
+HW_SEG7_RESULT_ADDR = 8190  # shifted far ahead of possible activations in BRAM. Must match seg7_driver.v
 class HWCompiler:
     """
     Walks the LAYERS list, allocates BRAM addresses, emits instructions,
