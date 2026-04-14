@@ -125,15 +125,32 @@ proc import_ip_abs_coe { xci_src coe_dir } {
         puts "WARNING: No .coe reference found in [file tail $xci_src]"
     }
 
-    # Write to %TEMP% with the original filename — import_ip requires the
-    # basename (sans .xci) to match the instance name declared in the XML.
-    set tmp [file join [file normalize $::env(TEMP)] [file tail $xci_src]]
-    set fh [open $tmp w]
+    # Write the patched XCI to a temp subdirectory inside the repo root.
+    # This avoids two problems:
+    #   1. %TEMP% paths can contain spaces (e.g. "VEDANT SAXENA") which
+    #      Vivado's import_ip splits into multiple arguments and rejects.
+    #   2. Patching the original XCI in-place risks leaving it corrupted
+    #      if import_ip errors out before the restore code can run.
+    # The repo root is chosen because the user controls it and it is
+    # virtually always space-free (git repos rarely live in spaced paths).
+    # The temp dir is deleted immediately after import regardless of outcome.
+    set tmp_dir  [file join $::origin_dir _xci_tmp]
+    set tmp_file [file join $tmp_dir [file tail $xci_src]]
+    file mkdir $tmp_dir
+
+    set fh [open $tmp_file w]
     puts -nonewline $fh $xml
     close $fh
 
-    import_ip $tmp
-    file delete $tmp
+    set import_err ""
+    catch { import_ip $tmp_file } import_err
+
+    # Always clean up — even if import_ip failed
+    file delete -force $tmp_dir
+
+    if { $import_err ne "" } {
+        error "import_ip failed for $ip_name: $import_err"
+    }
 }
 
 set coe_dir [file join $origin_dir src bram_init]
