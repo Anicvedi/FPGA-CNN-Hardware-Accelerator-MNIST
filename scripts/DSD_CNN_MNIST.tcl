@@ -112,7 +112,7 @@ foreach pair {
 proc import_ip_abs_coe { xci_src coe_dir } {
     set ip_name [file rootname [file tail $xci_src]]
 
-    set fh [open [list $xci_src] r]
+    set fh [open $xci_src r]
     set xml [read $fh]
     close $fh
 
@@ -128,12 +128,12 @@ proc import_ip_abs_coe { xci_src coe_dir } {
     # Write to %TEMP% with the original filename — import_ip requires the
     # basename (sans .xci) to match the instance name declared in the XML.
     set tmp [file join [file normalize $::env(TEMP)] [file tail $xci_src]]
-    set fh [open [list $tmp] w]
+    set fh [open $tmp w]
     puts -nonewline $fh $xml
     close $fh
 
-    import_ip -name $ip_name [list $tmp]
-    file delete [list $tmp]
+    import_ip $tmp
+    file delete $tmp
 }
 
 set coe_dir [file join $origin_dir src bram_init]
