@@ -45,3 +45,8 @@ data/MNIST/
 *.bit
 
 vivado_project_dir/
+
+# Python / GUI Generated Files
+debug/
+__pycache__/
+*.pyc

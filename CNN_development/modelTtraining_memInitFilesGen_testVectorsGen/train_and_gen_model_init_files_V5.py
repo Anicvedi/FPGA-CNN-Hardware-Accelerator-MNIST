@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-train_and_gen_model_init_files_V3.py
+train_and_gen_model_init_files_V5.py
 ====================================
 Generalized CNN-to-hardware compiler.
 
