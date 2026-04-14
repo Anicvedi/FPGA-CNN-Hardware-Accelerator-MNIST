@@ -158,11 +158,11 @@ current_fileset -simset [get_filesets top_level_uart]
 # --------------------------------------------------------
 # Runs
 # --------------------------------------------------------
-#launch_runs synth_1
-#wait_on_run synth_1
+launch_runs synth_1
+wait_on_run synth_1
 
 # Uncomment when ready to run implementation + bitstream:
-# launch_runs impl_1 -to_step write_bitstream
-# wait_on_run impl_1
+launch_runs impl_1 -to_step write_bitstream
+wait_on_run impl_1
 
 puts "INFO: Project $proj_name recreated successfully"
