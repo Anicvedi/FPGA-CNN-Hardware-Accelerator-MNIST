@@ -1,5 +1,5 @@
 `timescale 1ns / 1ps
-`define BEHAVIORAL_SIM // <--- COMMENT OUT for post-synthesis / implementation
+//`define BEHAVIORAL_SIM // <--- COMMENT OUT for post-synthesis / implementation
 
 //======================================================================
 //  tb_accelerator_TOP.v
