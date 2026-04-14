@@ -3,7 +3,7 @@ Ground Truth Summary
 Test image index : 0
 True label       : 7
 Predicted class  : 7
-Best Val Acc     : 98.06%
+Best Val Acc     : 0.00%
 
 --- Activation BRAM Address Map ---
   input                      addr     0  shape (28, 28, 1)  (112 words)
@@ -35,7 +35,7 @@ Best Val Acc     : 98.06%
   [ 12] 0x0108C03840940000
   [ 13] 0x0100402004010080
   [ 14] 0x0040102800068000
-  [ 15] 0x030940000FFF0000
+  [ 15] 0x0309400007FF8000
   [ 16] 0x0280000000000000
   [ 17] 0x0000000000000000
   [ 18] 0xFF00000000000000

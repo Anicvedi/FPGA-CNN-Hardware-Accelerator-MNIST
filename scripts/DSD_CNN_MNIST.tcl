@@ -260,12 +260,38 @@ module tb_accelerator_TOP;
         for (i = 0; i < 1024;            i = i + 1) ref_instructions[i] = 64'h0;
         for (i = 0; i < 16384;           i = i + 1) ref_weights[i]      = 16'h0;
 
-        $readmemh("test_config.hex",      test_config);
-        $readmemh("all_uart_bytes.hex",   all_uart_data);
-        $readmemh("expected_classes.hex", expected_classes);
-        $readmemh("true_labels.hex",      true_labels);
-        $readmemh("bram_instructions_init.hex",            ref_instructions);
-        $readmemh("bram_weights_init.hex",                 ref_weights);
+        // ---- OLD paths (BROKEN) -----------------------------------------------
+        // Subdirectory-relative paths fail because xsim does NOT run from the
+        // project root — it runs from its own working directory:
+        //   <proj>.sim/sim_1/behav/xsim/  (or synth/func, synth/timing, etc.)
+        // There is no test_images_uart/ subdirectory there, so every read
+        // silently returns 0 / X and the testbench runs with garbage data.
+        //
+        // $readmemh("test_images_uart/test_config.hex",      test_config);
+        // $readmemh("test_images_uart/all_uart_bytes.hex",   all_uart_data);
+        // $readmemh("test_images_uart/expected_classes.hex", expected_classes);
+        // $readmemh("test_images_uart/true_labels.hex",      true_labels);
+        //
+        // The two below were already bare filenames and correct — they worked
+        // only because you manually copied them to the xsim working directory:
+        //
+        // $readmemh("bram_instructions_init.hex",            ref_instructions);
+        // $readmemh("bram_weights_init.hex",                 ref_weights);
+        // -----------------------------------------------------------------------
+
+        // ---- NEW paths (CORRECT) ----------------------------------------------
+        // All files are registered in the Vivado project under sim_1 with
+        // FILE_TYPE "Data Files" (see scripts/DSD_CNN_MNIST.tcl).  Vivado
+        // copies them into every xsim working directory at compile time, so
+        // bare filenames always resolve correctly for all simulation types
+        // (behavioral, post-synthesis functional/timing, post-impl functional/timing).
+        // -----------------------------------------------------------------------
+        $readmemh("test_config.hex",             test_config);
+        $readmemh("all_uart_bytes.hex",          all_uart_data);
+        $readmemh("expected_classes.hex",        expected_classes);
+        $readmemh("true_labels.hex",             true_labels);
+        $readmemh("bram_instructions_init.hex",  ref_instructions);
+        $readmemh("bram_weights_init.hex",       ref_weights);
 
         num_test_images = test_config[0];
         bytes_per_image = test_config[1];
