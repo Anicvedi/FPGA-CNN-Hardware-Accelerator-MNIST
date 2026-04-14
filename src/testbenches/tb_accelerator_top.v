@@ -260,10 +260,10 @@ module tb_accelerator_TOP;
         for (i = 0; i < 1024;            i = i + 1) ref_instructions[i] = 64'h0;
         for (i = 0; i < 16384;           i = i + 1) ref_weights[i]      = 16'h0;
 
-        $readmemh("test_images_uart/test_config.hex",      test_config);
-        $readmemh("test_images_uart/all_uart_bytes.hex",   all_uart_data);
-        $readmemh("test_images_uart/expected_classes.hex", expected_classes);
-        $readmemh("test_images_uart/true_labels.hex",      true_labels);
+        $readmemh("test_config.hex",      test_config);
+        $readmemh("all_uart_bytes.hex",   all_uart_data);
+        $readmemh("expected_classes.hex", expected_classes);
+        $readmemh("true_labels.hex",      true_labels);
         $readmemh("bram_instructions_init.hex",            ref_instructions);
         $readmemh("bram_weights_init.hex",                 ref_weights);
 
