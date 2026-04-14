@@ -1,5 +1,5 @@
 `timescale 1ns / 1ps
-`define BEHAVIORAL_SIM // <--- COMMENT OUT for post-synthesis / implementation
+//`define BEHAVIORAL_SIM // <--- COMMENT OUT for post-synthesis / implementation
 
 //======================================================================
 //  tb_accelerator_TOP.v
@@ -104,7 +104,7 @@ module tb_accelerator_TOP;
     // -----------------------------------------------------------------
     //  Timing & sizing parameters
     // -----------------------------------------------------------------
-    localparam CLK_PERIOD       = 10;                       // 100 MHz
+    localparam CLK_PERIOD       = 20;                       // 100 MHz
     localparam CLOCK_FREQ       = 100_000_000;
     localparam SIM_BAUD_RATE    = 2_000_000;                // 2 Mbaud for sim
     localparam CLKS_PER_BIT     = CLOCK_FREQ / SIM_BAUD_RATE;
