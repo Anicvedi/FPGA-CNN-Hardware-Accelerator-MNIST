@@ -142,14 +142,16 @@ proc import_ip_abs_coe { xci_src coe_dir } {
     puts -nonewline $fh $xml
     close $fh
 
-    set import_err ""
-    catch { import_ip $tmp_file } import_err
+    # catch returns 0 on success, non-zero on error.
+    # The second variable receives the return value on success
+    # (import_ip returns the destination path) or the error message on failure.
+    set rc [catch { import_ip $tmp_file } import_result]
 
     # Always clean up — even if import_ip failed
     file delete -force $tmp_dir
 
-    if { $import_err ne "" } {
-        error "import_ip failed for $ip_name: $import_err"
+    if { $rc != 0 } {
+        error "import_ip failed for $ip_name: $import_result"
     }
 }
 
