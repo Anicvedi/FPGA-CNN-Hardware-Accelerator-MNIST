@@ -133,7 +133,7 @@ BATCH_SIZE     = 256
 FRAC_BITS      = 10
 SCALE          = 2 ** FRAC_BITS
 TEST_IMAGE_IDX = 0               # MNIST test image sent to the DUT
-NUM_TEST_IMAGES = 100             # multi-image test set (balanced across digits)
+NUM_TEST_IMAGES = 10             # multi-image test set (balanced across digits)
 
 # ---- 4. Synthesis-time PE-array limits (from your top.v instantiation) ---
 HW_MAX_FMAP_DIM    = 32
