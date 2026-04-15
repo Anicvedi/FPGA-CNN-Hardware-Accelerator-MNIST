@@ -5,19 +5,37 @@ module accelerator_TOP(
     input  wire        RESET,
     
     // UART
-    input  wire        UART_RX,
+    input  wire        UART_RX_ASYNC,
     output wire        UART_TX,
 
     // 7-segment display
-    output wire [6:0] SEG7_SEG,
-    output wire [3:0] SEG7_ANODE,
+    //output wire [6:0] SEG7_SEG,
+    //output wire [3:0] SEG7_ANODE,
     
     // LED indicators
     output wire LED_OPS_BUSY,
     output wire LED_OPS_DONE,
     output wire LED_OPS_DATARX,
-    output wire LED_IDLE
+    output wire LED_IDLE,
+    
+    // DISCRETE LED DISPLAY FOR DIGIT
+    output wire [3:0] CNN_DETECTED_DIGIT
 );
+    wire [15:0] CNN_RESULT_wire;
+    assign CNN_DETECTED_DIGIT = CNN_RESULT_wire[3:0] ;
+
+    // =========================================================
+    // 0. SYNCHRONIZER FOR ASYNC UART
+    // =========================================================
+    
+    wire UART_RX_SYNC;
+
+    synchronizer_2stage uart_synch (
+        .clk(CLK), 
+        .rst(RESET),                     
+        .async_sig_in(UART_RX_ASYNC), 
+        .sync_sig_out(UART_RX_SYNC)
+    );
     
     // =========================================================
     // 1. SYSTEM CONTROL WIRES
@@ -141,7 +159,7 @@ module accelerator_TOP(
     serial_to_bram u_host_if (
         .CLK(CLK), 
         .RESET(RESET),
-        .UART_RX(UART_RX),
+        .UART_RX(UART_RX_SYNC),
         .CNN_BUSY(cnn_busy),
         
         .START_CNN(start_cnn),
@@ -249,10 +267,10 @@ module accelerator_TOP(
         .BRAM_act_ADDRB(seg7_act_addrb),
         .BRAM_act_DOUTB(act_doutb),
         
-        .SEG7_SEG(SEG7_SEG),
-        .SEG7_ANODE(SEG7_ANODE),
+        .SEG7_SEG(),        // was .SEG7_SEG(SEG7_SEG)
+        .SEG7_ANODE(),      // was .SEG7_ANODE(SEG7_ANODE)
         
-        .CNN_RESULT(), // Ignored at top level (visualized via 7-seg physical pins)
+        .CNN_RESULT(CNN_RESULT_wire), // Ignored at top level (visualized via 7-seg physical pins)
         .BUSY(seg7_busy)
     );
 

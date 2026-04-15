@@ -122,9 +122,10 @@ module tb_accelerator_TOP;
     reg         reset;
     reg         uart_rx_pin;
     wire        uart_tx_pin;
-    wire [6:0]  seg7_seg;
-    wire [3:0]  seg7_anode;
+    //wire [6:0]  seg7_seg;
+    //wire [3:0]  seg7_anode;
     wire        led_busy, led_done, led_datarx, led_idle;
+    wire [3:0]  cnn_detected_digit;
 
     // -----------------------------------------------------------------
     //  DUT
@@ -132,14 +133,15 @@ module tb_accelerator_TOP;
     accelerator_TOP uut (
         .CLK           (clk),
         .RESET         (reset),
-        .UART_RX       (uart_rx_pin),
+        .UART_RX_ASYNC (uart_rx_pin),
         .UART_TX       (uart_tx_pin),
-        .SEG7_SEG      (seg7_seg),
-        .SEG7_ANODE    (seg7_anode),
+        //.SEG7_SEG      (seg7_seg),
+        //.SEG7_ANODE    (seg7_anode),
         .LED_OPS_BUSY  (led_busy),
         .LED_OPS_DONE  (led_done),
         .LED_OPS_DATARX(led_datarx),
-        .LED_IDLE      (led_idle)
+        .LED_IDLE      (led_idle),
+        .CNN_DETECTED_DIGIT(cnn_detected_digit)
     );
 
     `ifdef BEHAVIORAL_SIM
@@ -385,19 +387,7 @@ module tb_accelerator_TOP;
                 `ifdef BEHAVIORAL_SIM
                     hw_result = uut.u_seg7.CNN_RESULT;
                 `else
-                    begin : read_7seg
-                        integer wait_cyc;
-                        hw_result = 16'hFFFF;
-                        for (wait_cyc = 0; wait_cyc < 500000;
-                             wait_cyc = wait_cyc + 1) begin
-                            @(posedge clk);
-                            if (seg7_anode == 4'b1110) begin
-                                #(CLK_PERIOD);
-                                hw_result = decode_7seg(seg7_seg);
-                                disable read_7seg;
-                            end
-                        end
-                    end
+                    hw_result = {12'd0, cnn_detected_digit};
                 `endif
 
                 // ---- Functional check: HW == FP reference ----
@@ -464,7 +454,7 @@ module tb_accelerator_TOP;
 
         $display("==============================================================\n");
 
-        #(CLK_PERIOD * 100);
+        #(CLK_PERIOD * 1000);
         $finish;
     end
 
