@@ -1,16 +1,16 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import serial
 import serial.tools.list_ports
 from PIL import Image, ImageDraw
 import struct
-import os  # <-- Added for directory management
+import os
 
 class MNISTHardwareApp:
     def __init__(self, root):
         self.root = root
         self.root.title("CNN Hardware Accelerator - MNIST Interface")
-        self.root.geometry("550x420")
+        self.root.geometry("550x480")
         self.root.configure(bg="#2E3440")
         
         # --- Configuration ---
@@ -82,8 +82,11 @@ class MNISTHardwareApp:
         ttk.Separator(right_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
 
         # Action Buttons
-        self.btn_transmit = tk.Button(right_frame, text="TRANSMIT", bg="#A3BE8C", fg="black", font=("Arial", 12, "bold"), height=2, command=self._transmit_image)
+        self.btn_transmit = tk.Button(right_frame, text="TRANSMIT DRAWING", bg="#A3BE8C", fg="black", font=("Arial", 10, "bold"), height=2, command=self._transmit_image)
         self.btn_transmit.pack(fill=tk.X, pady=5)
+
+        self.btn_transmit_file = tk.Button(right_frame, text="TRANSMIT RAW FILE", bg="#EBCB8B", fg="black", font=("Arial", 10, "bold"), height=2, command=self._transmit_raw_file)
+        self.btn_transmit_file.pack(fill=tk.X, pady=5)
 
         self.btn_clear = tk.Button(right_frame, text="CLEAR CANVAS", bg="#4C566A", fg="white", font=("Arial", 10, "bold"), command=self._clear_canvas)
         self.btn_clear.pack(fill=tk.X, pady=5)
@@ -147,33 +150,26 @@ class MNISTHardwareApp:
         self.btn_stop_serial.config(state=tk.DISABLED)
 
     def _transmit_image(self):
-        # 1. Get raw pixel data
         resized_img = self.image.resize((self.MNIST_SIZE, self.MNIST_SIZE), Image.Resampling.LANCZOS)
         pixel_data_8bit = list(resized_img.getdata())
         
-        # 2. Reformat to 2D array matching the quantization logic
         img_q_2d = []
         for r in range(self.MNIST_SIZE):
             row = []
             for c in range(self.MNIST_SIZE):
                 pixel_val = pixel_data_8bit[r * self.MNIST_SIZE + c]
-                float_val = pixel_val / 255.0  # Normalize to [0.0, 1.0]
+                float_val = pixel_val / 255.0  
                 q_val = int(round(float_val * self.SCALE))
-                q_val = max(-32768, min(32767, q_val)) # Clip to int16
+                q_val = max(-32768, min(32767, q_val)) 
                 row.append(q_val)
             img_q_2d.append(row)
 
-        # 3. Build UART stream exactly like build_uart_stream
         uart = bytearray()
-        
-        # Start magic
         uart.extend(bytes([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22]))
         
-        # Header (16-bit little-endian)
         H, W, C = self.MNIST_SIZE, self.MNIST_SIZE, 1
         uart.extend(struct.pack('<HHH', H, W, C))
         
-        # Pixel data packing with hardware shift-register alignment
         words_per_row = (W + 7) // 8
         for row in range(H):
             for wd in range(words_per_row):
@@ -186,17 +182,11 @@ class MNISTHardwareApp:
                     uart.append(pix & 0xFF)
                     uart.append((pix >> 8) & 0xFF)
 
-        # End magic
         uart.extend(bytes([0x22, 0x11, 0xFF, 0xEE, 0xDD, 0xCC, 0xBB, 0xAA]))
         
-        # 4. Save and Send (Now routing to the /debug directory)
         try:
-            # Ensure the debug directory exists
             os.makedirs("debug", exist_ok=True)
-            
-            # Define the full path
             debug_filepath = os.path.join("debug", "debug_transmitted_image.hex")
-            
             with open(debug_filepath, "w") as f:
                 for b in uart:
                     f.write(f"{b:02X}\n")
@@ -207,11 +197,55 @@ class MNISTHardwareApp:
         if self.serial_conn and self.serial_conn.is_open:
             try:
                 self.serial_conn.write(uart)
-                print(f"Successfully transmitted {len(uart)} bytes over {self.serial_conn.port} at {self.serial_conn.baudrate} baud.")
+                print(f"Successfully transmitted {len(uart)} bytes.")
             except Exception as e:
                 messagebox.showerror("Serial Error", f"Transmission failed:\n{e}")
         else:
             messagebox.showinfo("Hardware Disconnected", f"Image saved to {debug_filepath}, but Serial is not connected.")
+
+    def _transmit_raw_file(self):
+        """Allows user to select a pre-compiled .hex file and stream it directly."""
+        filepath = filedialog.askopenfilename(
+            title="Select Raw Hex Packet",
+            filetypes=[("Hex Files", "*.hex"), ("All Files", "*.*")]
+        )
+        
+        if not filepath:
+            return  # User cancelled the dialog
+
+        try:
+            with open(filepath, 'r') as f:
+                # Read all lines, strip whitespace, ignore empty lines
+                lines = [line.strip() for line in f if line.strip()]
+
+            # Verification 1: Are they valid 2-character hex strings?
+            if not all(len(l) == 2 and all(c in '0123456789ABCDEFabcdef' for c in l) for l in lines):
+                messagebox.showerror("Invalid Format", "File must contain exactly one 2-character hex byte per line.")
+                return
+
+            # Verification 2: Does it contain the Magic Start Sequence?
+            expected_magic = ['AA', 'BB', 'CC', 'DD', 'EE', 'FF', '11', '22']
+            actual_magic = [l.upper() for l in lines[:8]]
+            if actual_magic != expected_magic:
+                messagebox.showerror(
+                    "Invalid Packet Structure", 
+                    f"File does not start with the correct magic sequence.\nExpected: {expected_magic}\nGot: {actual_magic}"
+                )
+                return
+
+            # Convert to byte array
+            byte_array = bytearray(int(x, 16) for x in lines)
+
+            # Transmit
+            if self.serial_conn and self.serial_conn.is_open:
+                self.serial_conn.write(byte_array)
+                print(f"Successfully transmitted raw file: {os.path.basename(filepath)} ({len(byte_array)} bytes)")
+                messagebox.showinfo("Success", f"Transmitted {len(byte_array)} bytes to hardware.")
+            else:
+                messagebox.showwarning("Serial Disconnected", "File is valid, but Serial port is not open. Start the serial connection first.")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to read or transmit file:\n{e}")
 
 if __name__ == "__main__":
     root = tk.Tk()

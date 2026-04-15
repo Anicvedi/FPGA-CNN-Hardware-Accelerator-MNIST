@@ -1,8 +1,8 @@
 `timescale 1ns / 1ps
 
 module accelerator_TOP(
-    input  wire        CLK,
-    input  wire        RESET,
+    input  wire        CLK_IN,
+    input  wire        RESET_IN,
     
     // UART
     input  wire        UART_RX_ASYNC,
@@ -19,8 +19,30 @@ module accelerator_TOP(
     output wire LED_IDLE,
     
     // DISCRETE LED DISPLAY FOR DIGIT
-    output wire [3:0] CNN_DETECTED_DIGIT
+    output wire [3:0] CNN_DETECTED_DIGIT,
+    
+    // BAUD RATE SELECT
+    input wire [1:0] BAUD_SELECT
 );
+
+// =========================================================
+    // 0. CLOCK & RESET GENERATION
+    // =========================================================
+    wire CLK;
+    wire RESET;
+    wire locked_status; 
+
+    clk_wiz_0 mmcm_100_to_70MHz (
+        .clk_in1(CLK_IN),
+        .clk_out1(CLK),
+        .reset(RESET_IN),      
+        .locked(locked_status)  
+    );
+
+    // This stays exactly the same! 
+    // You still need to invert locked_status for your internal modules.
+    assign RESET = ~locked_status;
+    
     wire [15:0] CNN_RESULT_wire;
     assign CNN_DETECTED_DIGIT = CNN_RESULT_wire[3:0] ;
 
@@ -161,6 +183,7 @@ module accelerator_TOP(
         .RESET(RESET),
         .UART_RX(UART_RX_SYNC),
         .CNN_BUSY(cnn_busy),
+        .BAUD_SELECT(BAUD_SELECT),
         
         .START_CNN(start_cnn),
         .IS_RECEIVING(is_receiving), // Wired to LED_OPS_DATARX
