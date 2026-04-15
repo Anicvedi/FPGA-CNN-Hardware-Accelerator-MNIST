@@ -351,6 +351,18 @@ module ops_convrelu #(
     reg [127:0] wr_buf;
     reg [13:0] wr_addr;
 
+    // registered dimension products (latched once at layer start, breaks DSP chains)
+    reg [13:0] reg_words_per_act_chan;
+    reg [13:0] reg_wgts_per_chan;
+    reg [13:0] reg_wgts_per_filt;
+    reg [13:0] reg_words_per_out_chan;
+
+    // base address accumulators (replace multiply-from-scratch with additions)
+    reg [13:0] al_chan_base;   // IN_FMAP_BASEADDR + cur_chan * reg_words_per_act_chan
+    reg [13:0] wl_chan_base;   // wl_filt_base + cur_chan * reg_wgts_per_chan
+    reg [13:0] wl_filt_base;   // WEIGHT_BASEADDR + cur_filt * reg_wgts_per_filt
+    reg [13:0] wr_filt_base;   // OUT_FMAP_BASEADDR + cur_filt * reg_words_per_out_chan
+
     //////////////// OUTPUT TRUNCATION + CONDITIONAL RELU ////////////////
 
     /*
@@ -405,6 +417,17 @@ module ops_convrelu #(
                 EXT_END_OF_COMPUTE <= 0;
                 if (EXT_START_OF_COMPUTE) begin
                     cur_filt <= 0;
+
+                    // Latch combinational dimension products (breaks DSP chains)
+                    reg_words_per_act_chan <= words_per_act_chan;
+                    reg_wgts_per_chan      <= wgts_per_chan;
+                    reg_wgts_per_filt     <= wgts_per_filt;
+                    reg_words_per_out_chan <= words_per_out_chan;
+
+                    // Initialize filter base accumulators
+                    wl_filt_base <= WEIGHT_BASEADDR;
+                    wr_filt_base <= OUT_FMAP_BASEADDR;
+
                     state    <= S_INIT_FILT;
                 end
             end
@@ -430,9 +453,11 @@ module ops_convrelu #(
                     for (oj = 0; oj < MAX_OUT_WIDTH; oj = oj + 1)
                         psum[oi][oj] <= 32'sd0;
 
-                // prepare load sub-FSM starting addresses
-                al_addr <= IN_FMAP_BASEADDR;
-                wl_addr <= WEIGHT_BASEADDR + cur_filt * wgts_per_filt;
+                // prepare load sub-FSM starting addresses (using accumulators)
+                al_addr      <= IN_FMAP_BASEADDR;
+                al_chan_base  <= IN_FMAP_BASEADDR;
+                wl_addr      <= wl_filt_base;
+                wl_chan_base  <= wl_filt_base;
 
                 // kick off both load sub-FSMs
                 al_state <= AL_CLEAR;
@@ -687,17 +712,20 @@ module ops_convrelu #(
                     wr_ow       <= 0;
                     wr_pack_cnt <= 0;
                     wr_buf      <= 128'd0;
-                    wr_addr     <= OUT_FMAP_BASEADDR + cur_filt * words_per_out_chan;
+                    wr_addr     <= wr_filt_base;  // uses accumulated filter base
                     state       <= S_WRITE_INIT;
                 end else begin
                     // next channel: reload weights and activations
                     cur_chan   <= cur_chan + 1;
                     first_chan <= 0;
 
-                    // set BRAM addresses for next channel
-                    al_addr <= IN_FMAP_BASEADDR + (cur_chan + 1) * words_per_act_chan;
-                    wl_addr <= WEIGHT_BASEADDR + cur_filt * wgts_per_filt
-                               + (cur_chan + 1) * wgts_per_chan;
+                    // Accumulate channel bases (addition only, no DSP multiply)
+                    al_chan_base <= al_chan_base + reg_words_per_act_chan;
+                    wl_chan_base <= wl_chan_base + reg_wgts_per_chan;
+
+                    // set BRAM addresses for next channel using accumulated bases
+                    al_addr <= al_chan_base + reg_words_per_act_chan;
+                    wl_addr <= wl_chan_base + reg_wgts_per_chan;
 
                     al_state <= AL_CLEAR;
                     al_row   <= 0;
@@ -769,6 +797,9 @@ module ops_convrelu #(
                     state <= S_DONE;
                 else begin
                     cur_filt <= cur_filt + 1;
+                    // Accumulate filter bases (addition, no multiply)
+                    wl_filt_base <= wl_filt_base + reg_wgts_per_filt;
+                    wr_filt_base <= wr_filt_base + reg_words_per_out_chan;
                     state    <= S_INIT_FILT;
                 end
             end

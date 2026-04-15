@@ -27,7 +27,8 @@ module serial_to_bram #(
                S_READ_HEAD  = 3'd1,
                S_CALC_DIMS  = 3'd2,
                S_RECEIVE    = 3'd3,
-               S_WAIT_END   = 3'd4;
+               S_WAIT_END   = 3'd4,
+               S_CALC_DIMS_1= 3'd5;
 
     reg [2:0]  state;
     reg [63:0] magic_shifter;
@@ -42,8 +43,6 @@ module serial_to_bram #(
     reg [3:0]  word_byte_idx; 
 
     wire [13:0] words_per_row       = (dim_w[2:0] == 0) ? (dim_w >> 3) : ((dim_w >> 3) + 1);
-    wire [31:0] total_words         = words_per_row * dim_h * dim_c;
-    wire [31:0] calc_expected_bytes = total_words << 4; 
 
     // Two-Stage Synchronizer
     reg rx_meta, rx_sync;
@@ -149,15 +148,17 @@ module serial_to_bram #(
                 end
                 
                 // ----------------------------------------------------------
-                // Latch the combinational dimension calculation for one cycle
-                // so ADDRA and expected_bytes are stable before S_RECEIVE.
-                // This assignment (ADDRA<=0) is the LAST non-blocking write
-                // to BRAM_act_ADDRA in this cycle, so it overrides the
-                // post-write increment above - which is correct since we are
-                // starting a fresh transfer.
+                // Pipelined dimension calculation:
+                //   Cycle 1: words_per_channel = words_per_row * dim_h  (1 DSP)
+                //   Cycle 2: total_bytes = words_per_channel * dim_c * 16  (1 DSP + shift)
                 // ----------------------------------------------------------
                 S_CALC_DIMS: begin
-                    expected_bytes <= calc_expected_bytes;
+                    expected_bytes <= words_per_row * dim_h;  // words per channel
+                    state          <= S_CALC_DIMS_1;
+                end
+
+                S_CALC_DIMS_1: begin
+                    expected_bytes <= (expected_bytes * dim_c) << 4;  // total bytes
                     byte_counter   <= 0;
                     word_byte_idx  <= 0;
                     BRAM_act_ADDRA <= 14'd0;   // reset for new frame

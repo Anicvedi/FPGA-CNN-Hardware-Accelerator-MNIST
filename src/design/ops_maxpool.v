@@ -1,4 +1,3 @@
-
 `timescale 1ns / 1ps
 
 module ops_maxpool(
@@ -125,7 +124,11 @@ module ops_maxpool(
     wire [9:0]  cur_x_in;
     wire [9:0]  cur_y_in;
 
-    // ---- registered address intermediates (breaks 4-DSP chain) ----
+    // ---- registered dimension products (latched at startup, breaks DSP chains) ----
+    reg [13:0] reg_in_words_per_row;
+    reg [13:0] reg_in_words_per_chan;
+
+    // ---- registered address intermediates ----
     reg [13:0] base_offset_reg;
     reg [9:0]  cur_x_in_reg;
 
@@ -153,7 +156,7 @@ module ops_maxpool(
     //  Each half comfortably fits in 10 ns.
 
     always @(posedge CLK) begin
-        base_offset_reg <= (c * in_words_per_chan) + (cur_y_in * in_words_per_row);
+        base_offset_reg <= (c * reg_in_words_per_chan) + (cur_y_in * reg_in_words_per_row);
         cur_x_in_reg    <= cur_x_in;
     end
 
@@ -185,6 +188,10 @@ module ops_maxpool(
             out_addr         <= OUT_FMAP_BASEADDR;
             out_cnt          <= 0;
             out_buf          <= 0;
+
+            // Latch combinational dimension products (breaks DSP chains)
+            reg_in_words_per_row  <= in_words_per_row;
+            reg_in_words_per_chan <= in_words_per_chan;
             
             p1_valid         <= 0;
             p4_valid         <= 0;
