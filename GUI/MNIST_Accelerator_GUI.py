@@ -54,17 +54,21 @@ class MNISTHardwareApp:
         self.port_var = tk.StringVar()
         self.port_cb = ttk.Combobox(right_frame, textvariable=self.port_var, state="readonly")
         self.port_cb.pack(fill=tk.X, pady=(0, 10))
+        
+        self.port_cb.bind("<Enter>", self._refresh_ports)
         self.port_cb.bind("<Button-1>", self._refresh_ports)
-        self._refresh_ports(None)
+        self._refresh_ports()
 
-        # Baud Rate Selectors
+        # Baud Rate Selectors (Now includes FPGA Switch Positions)
         tk.Label(right_frame, text="Baud Rate:", bg="#2E3440", fg="white", font=("Arial", 10)).pack(anchor="w")
         
         baud_subframe = tk.Frame(right_frame, bg="#2E3440")
         baud_subframe.pack(fill=tk.X, pady=(0, 15))
 
-        self.baud_var = tk.StringVar(value="115200")
-        self.baud_cb = ttk.Combobox(baud_subframe, textvariable=self.baud_var, values=["9600", "115200", "Custom"], state="readonly", width=8)
+        self.baud_var = tk.StringVar(value="115200 (SW: 11)")
+        # Updated to include switch mapping and widened the box
+        baud_options = ["9600 (SW: 01)", "19200 (SW: 10)", "115200 (SW: 11)", "Custom"]
+        self.baud_cb = ttk.Combobox(baud_subframe, textvariable=self.baud_var, values=baud_options, state="readonly", width=14)
         self.baud_cb.pack(side=tk.LEFT, padx=(0, 5))
         self.baud_cb.bind("<<ComboboxSelected>>", self._on_baud_select)
 
@@ -107,12 +111,19 @@ class MNISTHardwareApp:
         self.canvas.delete("all")
         self.draw.rectangle([0, 0, self.CANVAS_SIZE, self.CANVAS_SIZE], fill=0)
 
-    def _refresh_ports(self, event):
+    def _refresh_ports(self, event=None):
         ports = serial.tools.list_ports.comports()
         available_ports = [port.device for port in ports]
+        
+        current_selection = self.port_var.get()
         self.port_cb['values'] = available_ports
-        if available_ports and not self.port_var.get():
+        
+        if current_selection in available_ports:
+            self.port_cb.set(current_selection)
+        elif available_ports:
             self.port_cb.current(0)
+        else:
+            self.port_cb.set('')
 
     def _on_baud_select(self, event):
         if self.baud_var.get() == "Custom":
@@ -134,10 +145,18 @@ class MNISTHardwareApp:
                 messagebox.showerror("Error", "Please enter a valid integer for the custom baud rate.")
                 return
         else:
-            target_baud = int(baud_selection)
+            # Extract just the numbers from strings like "115200 (SW: 11)"
+            target_baud = int(baud_selection.split()[0])
 
         try:
-            self.serial_conn = serial.Serial(port, baudrate=target_baud, timeout=1) 
+            self.serial_conn = serial.Serial(
+                port=port,
+                baudrate=target_baud,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                timeout=1
+            ) 
             self.btn_start_serial.config(state=tk.DISABLED)
             self.btn_stop_serial.config(state=tk.NORMAL)
         except Exception as e:
@@ -204,26 +223,22 @@ class MNISTHardwareApp:
             messagebox.showinfo("Hardware Disconnected", f"Image saved to {debug_filepath}, but Serial is not connected.")
 
     def _transmit_raw_file(self):
-        """Allows user to select a pre-compiled .hex file and stream it directly."""
         filepath = filedialog.askopenfilename(
             title="Select Raw Hex Packet",
             filetypes=[("Hex Files", "*.hex"), ("All Files", "*.*")]
         )
         
         if not filepath:
-            return  # User cancelled the dialog
+            return 
 
         try:
             with open(filepath, 'r') as f:
-                # Read all lines, strip whitespace, ignore empty lines
                 lines = [line.strip() for line in f if line.strip()]
 
-            # Verification 1: Are they valid 2-character hex strings?
             if not all(len(l) == 2 and all(c in '0123456789ABCDEFabcdef' for c in l) for l in lines):
                 messagebox.showerror("Invalid Format", "File must contain exactly one 2-character hex byte per line.")
                 return
 
-            # Verification 2: Does it contain the Magic Start Sequence?
             expected_magic = ['AA', 'BB', 'CC', 'DD', 'EE', 'FF', '11', '22']
             actual_magic = [l.upper() for l in lines[:8]]
             if actual_magic != expected_magic:
@@ -233,10 +248,8 @@ class MNISTHardwareApp:
                 )
                 return
 
-            # Convert to byte array
             byte_array = bytearray(int(x, 16) for x in lines)
 
-            # Transmit
             if self.serial_conn and self.serial_conn.is_open:
                 self.serial_conn.write(byte_array)
                 print(f"Successfully transmitted raw file: {os.path.basename(filepath)} ({len(byte_array)} bytes)")
