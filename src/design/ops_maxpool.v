@@ -45,11 +45,13 @@ module ops_maxpool(
         - Max Pooling operation for 3D feature maps.
         - Supports variable kernel sizes up to 4x4.
         - Stride is equal to kernel size (non-overlapping pooling).
-        - A window is [POOL_KERNEL_SIZE x POOL_KERNEL_SIZE].
         - 128-bit Memory Interface: Fetches and writes 8 pixels per clock cycle.
 
         PIPELINE (7 stages total):
-        ---- Stage 1 (AGU):       Generate read addresses for Word 0 and Word 1.
+        ---- Stage 1 (AGU):       3-phase address generation with registered intermediates.
+                                    Phase 0 (PREP): Register base_offset/cur_x_in from iterators.
+                                    Phase 1 (W0):   Fetch word 0 using registered address.
+                                    Phase 2 (W1):   Fetch word 1. Advance iterators.
         ---- Stage 2 (WAIT):      BRAM routing latency.
         ---- Stage 3 (LATCH):     Word 0 arrives, latched into word0_reg.
         ---- Stage 4a (SHIFT):    Word 1 arrives. Concat, barrel-shift, extract 4 pixels. Registered.
@@ -57,8 +59,8 @@ module ops_maxpool(
         ---- Stage 4c (MAX_L2):   row_max=max(m01,m23). Vertical accum vs win_max. Registered.
         ---- Stage 4d (PACK+WR):  Pack result into 128-bit buffer. Write to BRAM when full.
 
-        Throughput: 1 pooling window row every 2 clock cycles (unchanged from original).
-        Latency:    +3 cycles vs original (pipeline drain at end of operation).
+        Throughput: 1 pooling window row every 3 clock cycles (was 2 before AGU pipelining).
+        Latency:    +1 cycle vs previous version (address pre-computation).
     */
 
     // clock gating:
@@ -73,12 +75,17 @@ module ops_maxpool(
 
     //////////////// FSM CODE BEGIN ////////////////
 
+    // ---- AGU phase constants ----
+    localparam AGU_PREP = 2'd0;  // register address intermediates
+    localparam AGU_W0   = 2'd1;  // fetch word 0
+    localparam AGU_W1   = 2'd2;  // fetch word 1, advance iterators
+
     // ---- state and AGU iterators ----
     reg running;
-    reg agu_fetch_w1; 
+    reg [1:0] agu_phase;
     reg [9:0] x_out, y_out, c, pool_y;
     
-    // ---- pipeline metadata: stages 1-3 + stage 4a (original p1-p4) ----
+    // ---- pipeline metadata: stages 1-3 + stage 4a (p1-p4) ----
     reg p1_valid, p2_valid, p3_valid, p4_valid;
     reg [9:0] p1_x_in, p2_x_in, p3_x_in, p4_x_in;
     reg p1_is_first_pool, p2_is_first_pool, p3_is_first_pool, p4_is_first_pool;
@@ -86,7 +93,7 @@ module ops_maxpool(
     reg p1_is_last_x,     p2_is_last_x,     p3_is_last_x,     p4_is_last_x;
     reg p1_is_abs_last,   p2_is_abs_last,   p3_is_abs_last,   p4_is_abs_last;
 
-    // ---- pipeline metadata: stages 4b, 4c, 4d (new p5-p7) ----
+    // ---- pipeline metadata: stages 4b, 4c, 4d (p5-p7) ----
     reg p5_valid, p6_valid, p7_valid;
     reg p5_is_first_pool, p6_is_first_pool;
     reg p5_is_last_pool,  p6_is_last_pool,  p7_is_last_pool;
@@ -117,7 +124,12 @@ module ops_maxpool(
     wire [13:0] in_words_per_chan;
     wire [9:0]  cur_x_in;
     wire [9:0]  cur_y_in;
-    wire [13:0] base_offset;
+
+    // ---- registered address intermediates (breaks 4-DSP chain) ----
+    reg [13:0] base_offset_reg;
+    reg [9:0]  cur_x_in_reg;
+
+    // ---- address from registered intermediates (additions only, fast) ----
     wire [13:0] word0_addr;
     wire [13:0] word1_addr;
 
@@ -133,12 +145,26 @@ module ops_maxpool(
 
 
     // =================================================================
+    //  REGISTERED ADDRESS INTERMEDIATES (continuously computed)
+    // =================================================================
+    //  These break the critical 4-DSP chain into two halves:
+    //    Half 1 (during PREP phase): iterators → cur_y_in(DSP) → base_offset(DSP) → register
+    //    Half 2 (during W0 phase):   register → additions(CARRY4) → BRAM_addrb
+    //  Each half comfortably fits in 10 ns.
+
+    always @(posedge CLK) begin
+        base_offset_reg <= (c * in_words_per_chan) + (cur_y_in * in_words_per_row);
+        cur_x_in_reg    <= cur_x_in;
+    end
+
+
+    // =================================================================
     //  MAIN CLOCKED PROCESS
     // =================================================================
     always @(posedge CLK) begin
         if (RESET) begin
             running          <= 0;
-            agu_fetch_w1     <= 0;
+            agu_phase        <= AGU_PREP;
             p1_valid         <= 0;
             p2_valid         <= 0;
             p3_valid         <= 0;
@@ -152,7 +178,7 @@ module ops_maxpool(
             EXT_END_OF_COMPUTE <= 0;
         end else if (EXT_START_OF_COMPUTE) begin
             running          <= 1;
-            agu_fetch_w1     <= 0;
+            agu_phase        <= AGU_PREP;  // start with address pre-computation
             EXT_END_OF_COMPUTE <= 0;
             x_out <= 0; y_out <= 0; c <= 0; pool_y <= 0;
             
@@ -169,11 +195,22 @@ module ops_maxpool(
         end else begin
 
             // =========================================================
-            // STAGE 1: AGU - Address Generation (unchanged)
+            // STAGE 1: AGU - 3-Phase Address Generation
             // =========================================================
             if (running) begin
-                if (!agu_fetch_w1) begin
-                    // Fetch Word 0
+                case (agu_phase)
+
+                AGU_PREP: begin
+                    // Address intermediates (base_offset_reg, cur_x_in_reg) are
+                    // being registered in the continuous always block above.
+                    // This phase gives them one cycle to capture the current
+                    // iterator values after the previous W1 phase advanced them.
+                    p1_valid  <= 0;
+                    agu_phase <= AGU_W0;
+                end
+
+                AGU_W0: begin
+                    // Fetch Word 0 - address uses registered intermediates (fast path)
                     BRAM_addrb       <= word0_addr;
                     p1_x_in          <= cur_x_in;
                     p1_is_first_pool <= (pool_y == 0);
@@ -184,13 +221,15 @@ module ops_maxpool(
                                         (c == IN_FMAP_DIM_C - 1) && 
                                         (pool_y == POOL_KERNEL_SIZE - 1);
                     p1_valid         <= 1;
-                    agu_fetch_w1     <= 1;
-                end else begin
+                    agu_phase        <= AGU_W1;
+                end
+
+                AGU_W1: begin
                     // Fetch Word 1
                     BRAM_addrb       <= word1_addr;
                     p1_valid         <= 0; 
                     
-                    // Advance iterators
+                    // Advance iterators (same logic as original)
                     if (pool_y == POOL_KERNEL_SIZE - 1) begin
                         pool_y <= 0;
                         if (x_out == OUT_FMAP_DIM_W - 1) begin
@@ -212,8 +251,11 @@ module ops_maxpool(
                         pool_y <= pool_y + 1;
                     end
                     
-                    agu_fetch_w1 <= 0;
+                    agu_phase <= AGU_PREP;  // back to address pre-computation
                 end
+
+                default: agu_phase <= AGU_PREP;
+                endcase
             end else begin
                 p1_valid <= 0;
             end
@@ -248,10 +290,8 @@ module ops_maxpool(
             end
             
             // =========================================================
-            // STAGE 4a: Barrel Shift + Pixel Extraction (NEW)
+            // STAGE 4a: Barrel Shift + Pixel Extraction
             // =========================================================
-            // At p4_valid: BRAM_doutb holds Word 1 data (2-cycle BRAM latency).
-            // Combinational wires (concat_row, shifted_row, pixel_p*) feed registered outputs.
             p4_valid         <= p3_valid;
             p4_x_in          <= p3_x_in;
             p4_is_first_pool <= p3_is_first_pool;
@@ -267,7 +307,7 @@ module ops_maxpool(
             end
 
             // =========================================================
-            // STAGE 4b: First-Level Pairwise Max (NEW)
+            // STAGE 4b: First-Level Pairwise Max
             // =========================================================
             p5_valid         <= p4_valid;
             p5_is_first_pool <= p4_is_first_pool;
@@ -281,7 +321,7 @@ module ops_maxpool(
             end
 
             // =========================================================
-            // STAGE 4c: Second-Level Max + Vertical Accumulation (NEW)
+            // STAGE 4c: Second-Level Max + Vertical Accumulation
             // =========================================================
             p6_valid         <= p5_valid;
             p6_is_first_pool <= p5_is_first_pool;
@@ -290,13 +330,12 @@ module ops_maxpool(
             p6_is_abs_last   <= p5_is_abs_last;
 
             if (p6_valid) begin
-                // row_max_comb and updated_win_max_comb are combinational (see below)
                 win_max             <= updated_win_max_comb;
                 updated_win_max_reg <= updated_win_max_comb;
             end
 
             // =========================================================
-            // STAGE 4d: Pack + BRAM Write (NEW)
+            // STAGE 4d: Pack + BRAM Write
             // =========================================================
             p7_valid        <= p6_valid;
             p7_is_last_pool <= p6_is_last_pool;
@@ -309,7 +348,6 @@ module ops_maxpool(
                     out_buf <= next_out_buf;
                     
                     if (out_cnt == 7 || p7_is_last_x) begin
-                        // Flush packed buffer to BRAM
                         BRAM_wea   <= 1;
                         BRAM_ena   <= 1;
                         BRAM_addra <= out_addr;
@@ -343,16 +381,16 @@ module ops_maxpool(
 
     //////////////// AGU CODE BEGIN ////////////////
 
-    // memory stride math:
+    // memory stride math (combinational, stable throughout operation):
     assign in_words_per_row = (IN_FMAP_DIM_W[2:0] == 0) ? (IN_FMAP_DIM_W >> 3) : ((IN_FMAP_DIM_W >> 3) + 1);
     assign in_words_per_chan = in_words_per_row * IN_FMAP_DIM_H;
 
-    // input address generation:
+    // iterator-derived values (combinational, used for registration):
     assign cur_x_in = x_out * POOL_KERNEL_SIZE;
     assign cur_y_in = y_out * POOL_KERNEL_SIZE + pool_y;
-    assign base_offset = (c * in_words_per_chan) + (cur_y_in * in_words_per_row);
-    
-    assign word0_addr = IN_FMAP_BASEADDR + base_offset + (cur_x_in >> 3);
+
+    // ----- Address from registered intermediates (additions only, no DSP) -----
+    assign word0_addr = IN_FMAP_BASEADDR + base_offset_reg + (cur_x_in_reg >> 3);
     assign word1_addr = word0_addr + 1;
 
     // ----- Stage 4a combinational: 256-bit concat + barrel shift + pixel extract -----

@@ -132,7 +132,7 @@ module tb_accelerator_TOP;
     accelerator_TOP uut (
         .CLK           (clk),
         .RESET         (reset),
-        .UART_RX       (uart_rx_pin),
+        .UART_RX_ASYNC (uart_rx_pin),
         .UART_TX       (uart_tx_pin),
         .SEG7_SEG      (seg7_seg),
         .SEG7_ANODE    (seg7_anode),

@@ -5,7 +5,7 @@ module accelerator_TOP(
     input  wire        RESET,
     
     // UART
-    input  wire        UART_RX,
+    input  wire        UART_RX_ASYNC,
     output wire        UART_TX,
 
     // 7-segment display
@@ -18,6 +18,18 @@ module accelerator_TOP(
     output wire LED_OPS_DATARX,
     output wire LED_IDLE
 );
+    // =========================================================
+    // 0. SYNCHRONIZER FOR ASYNC UART
+    // =========================================================
+    
+    wire UART_RX_SYNC;
+
+    synchronizer_2stage uart_synch (
+        .clk(CLK), 
+        .rst(RESET),                     
+        .async_sig_in(UART_RX_ASYNC), 
+        .sync_sig_out(UART_RX_SYNC)
+    );
     
     // =========================================================
     // 1. SYSTEM CONTROL WIRES
@@ -141,7 +153,7 @@ module accelerator_TOP(
     serial_to_bram u_host_if (
         .CLK(CLK), 
         .RESET(RESET),
-        .UART_RX(UART_RX),
+        .UART_RX(UART_RX_SYNC),
         .CNN_BUSY(cnn_busy),
         
         .START_CNN(start_cnn),

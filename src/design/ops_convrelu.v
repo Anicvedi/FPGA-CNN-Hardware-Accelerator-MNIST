@@ -335,6 +335,12 @@ module ops_convrelu #(
     reg        s1_capture;
     reg [9:0]  s1_ow;          // output column counter
 
+    // s2 pipeline stage (1 clock behind s1) - registered reduction tree output
+    reg        s2_valid;
+    reg        s2_capture;
+    reg [9:0]  s2_ow;          // delayed output column counter
+    reg signed [31:0] col_out_reg [0:MAX_OUT_WIDTH-1];
+
     // pipe drain counter
     reg [1:0]  drain_cnt;
 
@@ -382,6 +388,7 @@ module ops_convrelu #(
             BRAM_wgt_ENA     <= 0;
             s0_valid         <= 0;
             s1_valid         <= 0;
+            s2_valid         <= 0;
         end else begin
 
             // defaults (active-low pulse signals)
@@ -577,6 +584,8 @@ module ops_convrelu #(
                     s0_capture    <= 1;  // position 0 is always stride-aligned
                     s1_valid      <= 0;
                     s1_ow         <= 0;
+                    s2_valid      <= 0;
+                    s2_ow         <= 0;
                     state         <= S_COMPUTE;
                 end
             end // S_LOAD
@@ -592,7 +601,10 @@ module ops_convrelu #(
 
                     Pipeline stage 1 (next clock):
                       - PE products are valid. Adder trees produce col_out.
-                      - If s1_capture, accumulate col_out into psum.
+                      - col_out is registered into col_out_reg (breaks timing path).
+
+                    Pipeline stage 2 (2 clocks behind s0):
+                      - col_out_reg is valid. Accumulate into psum.
                 */
 
                 // S0: shift all activation spads left by 1
@@ -625,19 +637,32 @@ module ops_convrelu #(
                 s1_valid   <= s0_valid;
                 s1_capture <= s0_valid & s0_capture;
 
-                // S1: accumulate into partial sums
-                if (s1_capture) begin
+                // S1: register reduction tree output (breaks critical path)
+                for (oi = 0; oi < MAX_OUT_WIDTH; oi = oi + 1)
+                    col_out_reg[oi] <= col_out[oi];
+
+                // S1: advance output column counter (same as before)
+                if (s1_capture)
+                    s1_ow <= s1_ow + 1;
+
+                // S2: pipeline propagation
+                s2_valid   <= s1_valid;
+                s2_capture <= s1_capture;
+                if (s1_capture)
+                    s2_ow <= s1_ow;  // capture pre-increment s1_ow value
+
+                // S2: accumulate registered col_out into partial sums
+                if (s2_capture) begin
                     for (oi = 0; oi < MAX_OUT_WIDTH; oi = oi + 1) begin
                         if (first_chan)
-                            psum[oi][s1_ow] <= col_out[oi];
+                            psum[oi][s2_ow] <= col_out_reg[oi];
                         else
-                            psum[oi][s1_ow] <= psum[oi][s1_ow] + col_out[oi];
+                            psum[oi][s2_ow] <= psum[oi][s2_ow] + col_out_reg[oi];
                     end
-                    s1_ow <= s1_ow + 1;
                 end
 
-                // detect end of compute pipeline
-                if (!s0_valid && !s1_valid) begin
+                // detect end of compute pipeline (wait for s2 to drain)
+                if (!s0_valid && !s1_valid && !s2_valid) begin
                     drain_cnt <= 1;
                     state     <= S_PIPE_DRAIN;
                 end
@@ -646,7 +671,7 @@ module ops_convrelu #(
             //////////////// PIPELINE DRAIN ////////////////
 
             S_PIPE_DRAIN: begin
-                // allow one extra clock for final s1 capture
+                // allow one extra clock for final pipeline drain
                 if (drain_cnt == 0)
                     state <= S_CHAN_INC;
                 else
