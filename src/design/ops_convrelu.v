@@ -85,13 +85,14 @@ module ops_convrelu #(
     //////////////// CLOCK GATING ////////////////
 
     wire CLK;
-
+    /*
     BUFGCE u_clock_gating_buffer (
         .O(CLK),
         .CE(MODULE_EN | RESET),    // Clock enable input (synchronous to clk), enable clk during reset
         .I(CLK_IN)
     );
-
+    */
+    assign CLK = CLK_IN;    // Clk gating shifted to top module to satisfy MMCM bufg-bufg placement
     //////////////// WEIGHT BRAM TIE-OFFS ////////////////
 
     assign BRAM_wgt_WEA  = 1'b0;
