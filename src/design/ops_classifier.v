@@ -27,12 +27,14 @@ module ops_classifier(
 );
 
     wire CLK;
-    
+    /*
     // Strict synchronous clock gating
     BUFGCE u_clock_gating_buffer (
         .O(CLK), .CE(MODULE_EN | RESET), .I(CLK_IN)
     );
-
+    */
+    assign CLK = CLK_IN;    // Clk gating shifted to top module to satisfy MMCM bufg-bufg placement 
+    
     localparam S_IDLE     = 3'd0;
     localparam S_PIPELINE = 3'd1;
     localparam S_WRITE    = 3'd2;

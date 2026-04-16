@@ -1,13 +1,13 @@
 `timescale 1ns / 1ps
 
 module serial_to_bram #(
-    parameter CLOCK_FREQ = 100_000_000, // Default 100 MHz
-    parameter BAUD_RATE  = 2000000      // Default to 2Mbps to match testbench
+    parameter CLOCK_FREQ = 70_000_000  //100_000_000  // Default 100 MHz
 )(
     input  wire CLK,
     input  wire RESET,
     input  wire UART_RX,
     input  wire CNN_BUSY, 
+    input  wire [1:0] BAUD_SELECT,
     
     output reg  START_CNN,
     output wire IS_RECEIVING, 
@@ -19,7 +19,20 @@ module serial_to_bram #(
     output reg  [127:0] BRAM_act_DINA
 );
 
-    localparam CLKS_PER_BIT = CLOCK_FREQ / BAUD_RATE;
+    // Baud rate selection mux
+    // 2'b00: 2_000_000  (simulation)
+    // 2'b01: 9_600      (board test)
+    // 2'b10: 19_200     (board test)
+    // 2'b11: 115_200    (board test)
+    reg [15:0] clks_per_bit;
+    always @(*) begin
+        case (BAUD_SELECT)
+            2'b00:   clks_per_bit = CLOCK_FREQ / 2_000_000;
+            2'b01:   clks_per_bit = CLOCK_FREQ / 9_600;
+            2'b10:   clks_per_bit = CLOCK_FREQ / 19_200;
+            2'b11:   clks_per_bit = CLOCK_FREQ / 115_200;
+        endcase
+    end
     localparam [63:0] START_SEQ = 64'hAA_BB_CC_DD_EE_FF_11_22;
     localparam [63:0] END_SEQ   = 64'h22_11_FF_EE_DD_CC_BB_AA;
 
@@ -59,10 +72,11 @@ module serial_to_bram #(
     wire [7:0] rx_data;
     wire       rx_valid;
 
-    uart_rx #(.CLKS_PER_BIT(CLKS_PER_BIT)) u_uart_rx ( 
+    uart_rx u_uart_rx ( 
         .clk(CLK),
         .reset(RESET),
         .rx(rx_sync),
+        .clks_per_bit(clks_per_bit),
         .data(rx_data),
         .valid(rx_valid)
     );
@@ -212,8 +226,9 @@ module serial_to_bram #(
 endmodule
 
 // ==========================================================================
-module uart_rx #(parameter CLKS_PER_BIT = 10417)(
+module uart_rx (
     input  clk, reset, rx,
+    input  [15:0] clks_per_bit,
     output reg [7:0] data,
     output reg valid
 );
@@ -226,9 +241,9 @@ module uart_rx #(parameter CLKS_PER_BIT = 10417)(
         else begin
             valid <= 0;
             case(state)
-                0: if (rx == 0) begin state <= 1; clk_count <= CLKS_PER_BIT/2; end
-                1: if (clk_count == 0) begin state <= 2; clk_count <= CLKS_PER_BIT; bit_idx <= 0; end else clk_count <= clk_count - 1;
-                2: if (clk_count == 0) begin data[bit_idx] <= rx; if (bit_idx == 7) state <= 3; else bit_idx <= bit_idx + 1; clk_count <= CLKS_PER_BIT; end else clk_count <= clk_count - 1;
+                0: if (rx == 0) begin state <= 1; clk_count <= clks_per_bit/2; end
+                1: if (clk_count == 0) begin state <= 2; clk_count <= clks_per_bit; bit_idx <= 0; end else clk_count <= clk_count - 1;
+                2: if (clk_count == 0) begin data[bit_idx] <= rx; if (bit_idx == 7) state <= 3; else bit_idx <= bit_idx + 1; clk_count <= clks_per_bit; end else clk_count <= clk_count - 1;
                 3: if (clk_count == 0) begin state <= 0; valid <= 1; end else clk_count <= clk_count - 1;
             endcase
         end

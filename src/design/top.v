@@ -1,8 +1,8 @@
 `timescale 1ns / 1ps
 
 module accelerator_TOP(
-    input  wire        CLK,
-    input  wire        RESET,
+    input  wire        CLK_IN,
+    input  wire        RESET_IN,
     
     // UART
     input  wire        UART_RX_ASYNC,
@@ -19,8 +19,78 @@ module accelerator_TOP(
     output wire LED_IDLE,
     
     // DISCRETE LED DISPLAY FOR DIGIT
-    output wire [3:0] CNN_DETECTED_DIGIT
+    output wire [3:0] CNN_DETECTED_DIGIT,
+    
+    // BAUD RATE SELECT
+    input wire [1:0] BAUD_SELECT
 );
+
+// =========================================================
+    // 0. CLOCK & RESET GENERATION
+    // =========================================================
+    // CLK_RAW: raw MMCM output, no internal BUFG.
+    // clk_wiz_0 must be recustomised: Output Clocks tab ->
+    // uncheck "Use Global Buffer" for CLK_OUT1.
+    // This eliminates the clkout1_buf BUFG that previously sat
+    // between the MMCM and the BUFGCEs, causing the
+    // rule_cascaded_bufg violation (BUFG->BUFG cascade requires
+    // adjacency, impossible for 3 BUFGCEs off one source BUFG).
+    // MMCM CLKOUT -> BUFGCE uses dedicated HROW routing and is
+    // not subject to the cascade adjacency rule.
+    wire CLK_RAW;   // raw 70 MHz from MMCM (no BUFG)
+    wire CLK;       // always-on buffered 70 MHz (BUFGCE, CE=1)
+    wire RESET;
+    wire locked_status;
+    wire mmcm_clk_fb;
+    
+    clk_wiz_0 mmcm_100_to_70MHz (
+        .clk_in1  (CLK_IN),
+        .clk_out1 (CLK_RAW),   // raw output - BUFG disabled in IP
+        .reset    (RESET_IN),
+        .locked   (locked_status),
+        .clkfb_in(mmcm_clk_fb),     // input clkfb_in
+        .clkfb_out(mmcm_clk_fb)    // output clkfb_out
+    );
+
+    // Pre-declare enable wires used in BUFGCE CEs to avoid
+    // forward-reference implicit-wire warnings.
+    wire en_conv, en_maxp, en_class;
+
+    // ---- Four BUFGCEs all driven from raw MMCM output --------
+    // No BUFG sits between MMCM and these cells, so
+    // rule_cascaded_bufg does not fire regardless of placement.
+
+    // Always-on: feeds all non-gated logic (controller, BRAMs,
+    // synchronizer, serial_to_bram, seg7_driver).
+    BUFGCE u_clk_main (
+        .O  (CLK),
+        .CE (1'b1),
+        .I  (CLK_RAW)
+    );
+
+    // Gated clocks for the three compute engines:
+    wire CLK_MAXP, CLK_CONV, CLK_CLASS;
+
+    BUFGCE u_clock_gating_buffer_maxp (
+        .O  (CLK_MAXP),
+        .CE (en_maxp | RESET),
+        .I  (CLK_RAW)
+    );
+
+    BUFGCE u_clock_gating_buffer_conv (
+        .O  (CLK_CONV),
+        .CE (en_conv | RESET),
+        .I  (CLK_RAW)
+    );
+
+    BUFGCE u_clock_gating_buffer_class (
+        .O  (CLK_CLASS),
+        .CE (en_class | RESET),
+        .I  (CLK_RAW)
+    );
+
+    assign RESET = ~locked_status;
+    
     wire [15:0] CNN_RESULT_wire;
     assign CNN_DETECTED_DIGIT = CNN_RESULT_wire[3:0] ;
 
@@ -60,7 +130,7 @@ module accelerator_TOP(
     // =========================================================
     // 2. CONTROLLER CONFIGURATION BUS
     // =========================================================
-    wire en_conv, en_maxp, en_class;
+    // en_conv, en_maxp, en_class declared earlier (used in BUFGCE CEs)
     wire sop_conv, sop_maxp, sop_class;
     wire eop_conv, eop_maxp, eop_class;
 
@@ -161,6 +231,7 @@ module accelerator_TOP(
         .RESET(RESET),
         .UART_RX(UART_RX_SYNC),
         .CNN_BUSY(cnn_busy),
+        .BAUD_SELECT(BAUD_SELECT),
         
         .START_CNN(start_cnn),
         .IS_RECEIVING(is_receiving), // Wired to LED_OPS_DATARX
@@ -208,7 +279,7 @@ module accelerator_TOP(
         .MAX_KERNEL_WIDTH(5), 
         .MAX_OUT_WIDTH(24)
     ) u_conv (
-        .CLK_IN(CLK), 
+        .CLK_IN(CLK_CONV), 
         .RESET(RESET), 
         .MODULE_EN(en_conv), 
         .EXT_START_OF_COMPUTE(sop_conv), 
@@ -227,7 +298,7 @@ module accelerator_TOP(
 
     // Compute Engine: Max Pooling
     ops_maxpool u_pool (
-        .CLK_IN(CLK), 
+        .CLK_IN(CLK_MAXP), 
         .RESET(RESET), 
         .MODULE_EN(en_maxp), 
         .EXT_START_OF_COMPUTE(sop_maxp), 
@@ -243,7 +314,7 @@ module accelerator_TOP(
 
     // Compute Engine: Classifier (ArgMax)
     ops_classifier u_cls (
-        .CLK_IN(CLK), 
+        .CLK_IN(CLK_CLASS), 
         .RESET(RESET), 
         .MODULE_EN(en_class), 
         .EXT_START_OF_COMPUTE(sop_class), 

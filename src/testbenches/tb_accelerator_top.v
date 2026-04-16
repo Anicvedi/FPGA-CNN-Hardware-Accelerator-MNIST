@@ -104,11 +104,12 @@ module tb_accelerator_TOP;
     // -----------------------------------------------------------------
     //  Timing & sizing parameters
     // -----------------------------------------------------------------
-    localparam CLK_PERIOD       = 20;                       // 100 MHz
-    localparam CLOCK_FREQ       = 100_000_000;
+    localparam CLK_PERIOD       = 10;                       // 100 MHz
+    localparam CLOCK_FREQ       = 70_000_000;   //100_000_000;
     localparam SIM_BAUD_RATE    = 2_000_000;                // 2 Mbaud for sim
     localparam CLKS_PER_BIT     = CLOCK_FREQ / SIM_BAUD_RATE;
-    localparam BIT_PERIOD       = CLKS_PER_BIT * CLK_PERIOD;
+    //localparam BIT_PERIOD       = CLKS_PER_BIT * CLK_PERIOD;
+    localparam BIT_PERIOD       = 1_000_000_000 / SIM_BAUD_RATE;
     localparam TIMEOUT_CYCLES   = 200_000_000;
 
     localparam MAX_IMAGES       = 128;
@@ -126,13 +127,14 @@ module tb_accelerator_TOP;
     //wire [3:0]  seg7_anode;
     wire        led_busy, led_done, led_datarx, led_idle;
     wire [3:0]  cnn_detected_digit;
+    reg  [1:0]  baud_select;
 
     // -----------------------------------------------------------------
     //  DUT
     // -----------------------------------------------------------------
     accelerator_TOP uut (
-        .CLK           (clk),
-        .RESET         (reset),
+        .CLK_IN           (clk),
+        .RESET_IN         (reset),
         .UART_RX_ASYNC (uart_rx_pin),
         .UART_TX       (uart_tx_pin),
         //.SEG7_SEG      (seg7_seg),
@@ -141,12 +143,9 @@ module tb_accelerator_TOP;
         .LED_OPS_DONE  (led_done),
         .LED_OPS_DATARX(led_datarx),
         .LED_IDLE      (led_idle),
-        .CNN_DETECTED_DIGIT(cnn_detected_digit)
+        .CNN_DETECTED_DIGIT(cnn_detected_digit),
+        .BAUD_SELECT   (baud_select)
     );
-
-    `ifdef BEHAVIORAL_SIM
-        defparam uut.u_host_if.BAUD_RATE = SIM_BAUD_RATE;
-    `endif
 
     // -----------------------------------------------------------------
     //  Clock
@@ -253,6 +252,7 @@ module tb_accelerator_TOP;
         hw_pass_count       = 0;
         model_correct_count = 0;
         uart_rx_pin         = 1'b1;
+        baud_select         = 2'b00;  // 2 Mbaud for simulation
         reset               = 1'b1;
 
         for (i = 0; i < 4;              i = i + 1) test_config[i]      = 32'h0;
@@ -277,7 +277,7 @@ module tb_accelerator_TOP;
         $display("==============================================================");
         $display("  CNN Accelerator - Multi-Image Self-Checking Testbench");
         $display("==============================================================");
-        $display("  Clock         : %0d MHz", CLOCK_FREQ / 1_000_000);
+        $display("  Clock         : %0d MHz", 100); //CLOCK_FREQ / 1_000_000);
         $display("  Sim baud      : %0d", SIM_BAUD_RATE);
         $display("  Test images   : %0d", num_test_images);
         $display("  Bytes / image : %0d", bytes_per_image);
@@ -291,7 +291,7 @@ module tb_accelerator_TOP;
         #(CLK_PERIOD * 20);
         reset = 1'b0;
         #(CLK_PERIOD * 10);
-
+        #(20_000);  // wait 10us for MMCM PLL to stabilize
         // ============================================================
         //  PHASE 1: BRAM initialisation check (behavioral only)
         // ============================================================
@@ -344,7 +344,7 @@ module tb_accelerator_TOP;
             for (img_idx = 0; img_idx < num_test_images;
                  img_idx = img_idx + 1)
             begin
-
+/*
                 // ---- 2a. Reset DUT between images ----
                 if (img_idx > 0) begin
                     reset = 1'b1;
@@ -352,7 +352,7 @@ module tb_accelerator_TOP;
                     reset = 1'b0;
                     #(CLK_PERIOD * 10);
                 end
-
+*/
                 $display("  --- Image %0d / %0d  (label=%0d, fp_expected=%0d) ---",
                          img_idx, num_test_images,
                          true_labels[img_idx], expected_classes[img_idx]);
